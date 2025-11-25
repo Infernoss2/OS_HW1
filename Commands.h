@@ -1,20 +1,21 @@
 // Ver: 04-11-2025
 #ifndef SMASH_COMMAND_H_
 #define SMASH_COMMAND_H_
-
+// #pragma once TODO think about it
+#include <list>
 #include <vector>
 
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
 
 class Command {
-    // TODO: Add your data members
-    char **argv; // this size should be 20
-
+    std::vector<char*> args;
+    const char* cmd_name;
+    int size_of_args; // parse return int so I think we need this variable
 public:
     Command(const char *cmd_line);
 
-    virtual ~Command();
+    virtual ~Command() = default;
 
     virtual void execute() = 0;
 
@@ -43,6 +44,7 @@ public:
     void execute() override;
 };
 
+                            // special commands
 
 class RedirectionCommand : public Command {
     // TODO: Add your data members
@@ -99,10 +101,11 @@ public:
 
 class ChangeDirCommand : public BuiltInCommand {
     // TODO: Add your data members public:
+    // check if lastpwd is nullptr
+public:
     ChangeDirCommand(const char *cmd_line, char **plastPwd);
 
-    virtual ~ChangeDirCommand() {
-    }
+    virtual ~ChangeDirCommand() {}
 
     void execute() override;
 };
@@ -139,7 +142,8 @@ public:
 class JobsList;
 
 class QuitCommand : public BuiltInCommand {
-    // TODO: Add your data members public:
+    // TODO: Add your data members
+public:
     QuitCommand(const char *cmd_line, JobsList *jobs);
 
     virtual ~QuitCommand() {
@@ -151,18 +155,19 @@ class QuitCommand : public BuiltInCommand {
 class JobsList {
 public:
     class JobEntry {
-        // TODO: Add your data members
         int job_id;
-        JobEntry *next
+        Command *command;
     };
 
-    // TODO: Add your data members
+    std::list<JobEntry *> jobs;  // head
+    JobEntry *lastJob;
+    int size = jobs.size();
 public:
     JobsList();
 
     ~JobsList();
 
-    void addJob(Command *cmd, bool isStopped = false);
+    void addJob(Command *cmd, bool isStopped = false); // check if the size greater than 100
 
     void printJobsList();
 
@@ -256,9 +261,8 @@ public:
 
 class SmallShell {
 private:
-    // TODO: Add your data members
-    JobsList *job;
-    int max_job_id;
+    JobsList *jobs_list;
+    char *lastPwd = nullptr;
     SmallShell();
 
 public:

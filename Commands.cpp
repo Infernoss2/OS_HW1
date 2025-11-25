@@ -74,25 +74,11 @@ void _removeBackgroundSign(char *cmd_line) {
 }
 
 // TODO: Add your implementation for classes in Commands.h
-Command::Command(const char *cmd_line){
-    argv = new char*[COMMAND_MAX_ARGS];
-    for (int i = 0; i < COMMAND_MAX_ARGS; i++) {
-        argv[i] = nullptr;
-    }
-    _parseCommandLine(cmd_line, this->argv);
+Command::Command(const char *cmd_line): cmd_name(cmd_line) {
+    size_of_args = _parseCommandLine(cmd_line, args.data());
 }
 
-Command::~Command() {
-    if (!argv)
-        return;
-    for (int i = 0; i < COMMAND_MAX_ARGS; i++) {
-        if (argv[i])
-            free(argv[i]);
-        argv[i] = nullptr;
-    }
-    delete[] argv;
-    argv = nullptr;
-}
+BuiltInCommand::BuiltInCommand(const char *cmd_line) : Command(cmd_line) {}
 
 ShowPidCommand::ShowPidCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
 
@@ -100,14 +86,9 @@ void ShowPidCommand::execute() {
     std::cout << "smash pid is " << getpid() << std::endl;
 }
 
+SmallShell::SmallShell() : jobs_list(new JobsList()){}
 
-SmallShell::SmallShell() {
-    // TODO: add your implementation
-}
-
-SmallShell::~SmallShell() {
-    // TODO: add your implementation
-}
+SmallShell::~SmallShell() {delete jobs_list;}
 
 /**
 * Creates and returns a pointer to Command class which matches the given command line (cmd_line)
@@ -116,51 +97,47 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
     string cmd_s = _trim(string(cmd_line));
     string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
 
+    if (cmd_line == ""){return nullptr;} // empty command
+
     if (firstWord.compare("pwd") == 0) {return new GetCurrDirCommand(cmd_line);}
 
-    else if (firstWord.compare("showpid") == 0) {return new ShowPidCommand(cmd_line);}
+    if (firstWord.compare("showpid") == 0) {return new ShowPidCommand(cmd_line);}
 
-    else if (firstWord.compare("chprompt") == 0) {return new chpromptCommand(cmd_line);}
+    if (firstWord.compare("chprompt") == 0) {return new chpromptCommand(cmd_line);}
 
-    else if (firstWord.compare("cd") == 0) {
+    if (firstWord.compare("cd") == 0) { return new ChangeDirCommand(cmd_line, &lastPwd);}
 
-    }
-    else if (firstWord.compare("jobs") == 0) {
+    if (firstWord.compare("jobs") == 0) { return new JobsCommand(cmd_line, jobs_list);}
 
-    }
-    else if (firstWord.compare("fg") == 0) {
+    if (firstWord.compare("fg") == 0) { return new ShowPidCommand(cmd_line);}
 
-    }
-    else if (firstWord.compare("quit") == 0) {
+    if (firstWord.compare("quit") == 0) {return new QuitCommand(cmd_line, jobs_list);}
 
-    }
-    else if (firstWord.compare("kill") == 0) {
+    if (firstWord.compare("kill") == 0) {return new KillCommand(cmd_line, jobs_list);}
 
-    }
-    else if (firstWord.compare("alias") == 0) {
+    if (firstWord.compare("alias") == 0) {return new AliasCommand(cmd_line);}
 
-    }
-    else if (firstWord.compare("unalias") == 0) {
+    if (firstWord.compare("unalias") == 0) {return new UnAliasCommand(cmd_line);}
 
-    }
-    else if (firstWord.compare("unsetenv") == 0) {
+    if (firstWord.compare("unsetenv") == 0) { return new UnSetEnvCommand(cmd_line);}
 
-    }
-    else if (firstWord.compare("sysinfo") == 0) {
+    if (firstWord.compare("sysinfo") == 0) { return new SysInfoCommand(cmd_line);}
 
-    }
+    if (firstWord.compare("du")){return new DiskUsageCommand(cmd_line);}
 
-    else {
-      return new ExternalCommand(cmd_line);
-    }
+    if (firstWord.compare("whoami")){return new WhoAmICommand(cmd_line);}
+
+    // if (firstWord.compare("usbinfo")){return new USBInfoCommand(cmd_line);} // bonus
+
+    return new ExternalCommand(cmd_line);
 
     return nullptr;
 }
 
 void SmallShell::executeCommand(const char *cmd_line) {
-    // TODO: Add your implementation here
-    // for example:
     Command* cmd = CreateCommand(cmd_line);
+    if (cmd == nullptr){return;} // empty command
+    // TODO check for external command
     cmd->execute();
     // Please note that you must fork smash process for some commands (e.g., external commands....)
 }
