@@ -2,25 +2,29 @@
 #ifndef SMASH_COMMAND_H_
 #define SMASH_COMMAND_H_
 // #pragma once TODO think about it
+#include <array>
 #include <list>
+#include <utility>
 #include <vector>
 
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
 
 class Command {
-    std::vector<char*> args;
+    char** args = nullptr;
     const char* cmd_name;
-    int size_of_args; // parse return int so I think we need this variable
+    int size_of_args;
 public:
     Command(const char *cmd_line);
 
-    virtual ~Command() = default;
+    virtual ~Command();
 
     virtual void execute() = 0;
 
     //virtual void prepare();
     //virtual void cleanup();
+    char** getArgs() {return args;}
+    int getArgsLength() {return size_of_args;}
     // TODO: Add your extra methods if needed
 };
 
@@ -100,8 +104,7 @@ public:
 };
 
 class ChangeDirCommand : public BuiltInCommand {
-    // TODO: Add your data members public:
-    // check if lastpwd is nullptr
+    char** plastPwd;
 public:
     ChangeDirCommand(const char *cmd_line, char **plastPwd);
 
@@ -263,6 +266,8 @@ class SmallShell {
 private:
     JobsList *jobs_list;
     char *lastPwd = nullptr;
+    pid_t fg_pid = -1;
+    char* fg_cmd;
     SmallShell();
 
 public:
@@ -280,6 +285,13 @@ public:
     ~SmallShell();
 
     void executeCommand(const char *cmd_line);
+
+    pid_t getFgPid() const {return fg_pid;}
+    void setFgPid(pid_t o_fg_pid) {fg_pid = o_fg_pid;}
+    void clear_fg_pid() {fg_pid = -1;}
+
+    std::string getFgCmd() const {return fg_cmd;}
+    void setFgCmd(char* o_fg_cmd) {fg_cmd = o_fg_cmd;}
 
     // TODO: add extra methods as needed
 };

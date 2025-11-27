@@ -7,6 +7,8 @@
 #include <iomanip>
 #include "Commands.h"
 
+#include "../../../../../AppData/Local/Programs/winlibs-x86_64-posix-seh-gcc-15.1.0-mingw-w64msvcrt-12.0.0-r1/mingw64/x86_64-w64-mingw32/include/limits.h"
+
 using namespace std;
 
 const std::string WHITESPACE = " \n\r\t\f\v";
@@ -74,8 +76,23 @@ void _removeBackgroundSign(char *cmd_line) {
 }
 
 // TODO: Add your implementation for classes in Commands.h
-Command::Command(const char *cmd_line): cmd_name(cmd_line) {
-    size_of_args = _parseCommandLine(cmd_line, args.data());
+Command::Command(const char *cmd_line){
+    args = new char*[COMMAND_MAX_ARGS+1]; // +1 for the null terminator
+    for (int i = 0; i < COMMAND_MAX_ARGS+1; i++) {
+        args[i] = nullptr;
+    }
+    size_of_args = _parseCommandLine(cmd_line, args);
+    cmd_name = args[0];
+}
+
+Command::~Command() {
+    if (args) {
+        for (int i = 0; i < COMMAND_MAX_ARGS+1; i++) {
+            free(args[i]);
+        }
+        delete [] args;
+        args = nullptr;
+    }
 }
 
 BuiltInCommand::BuiltInCommand(const char *cmd_line) : Command(cmd_line) {}
@@ -84,6 +101,46 @@ ShowPidCommand::ShowPidCommand(const char *cmd_line) : BuiltInCommand(cmd_line) 
 
 void ShowPidCommand::execute() {
     std::cout << "smash pid is " << getpid() << std::endl;
+}
+
+ChangeDirCommand::ChangeDirCommand(const char *cmd_line, char **plastPWD) :
+    BuiltInCommand(cmd_line),
+    plastPwd(plastPWD) {}
+
+void ChangeDirCommand::execute() {
+    char** cur_args = getArgs();
+    int argc = getArgsLength();
+    if (argc == 1) //cd without anything
+        return;
+    if (argc > 2) {
+        std::cerr << "smash error: cd: too many arguments" << std::endl;
+        return;
+    }
+    const char* target = cur_args[1];       // the new directory
+    char cur_dir[PATH_MAX];
+    if (getcwd(cur_dir, PATH_MAX) == nullptr) {
+        perror("smash error: getcwd failed");
+        return;
+    }
+
+    if (strcmp(cur_args[1], "-") == 0) {
+        if (plastPwd == nullptr || *plastPwd == nullptr) {
+            std::cerr << "smash error: cd: OLDPWD not set" << std::endl;
+            return;
+        }
+        target = *plastPwd;
+    }
+    if (chdir(target) == -1) {
+        perror("smash error: chdir failed");
+        return;
+    }
+    // assigning new last PWD
+    if (plastPwd != nullptr) {
+        delete[] *plastPwd;
+        char* new_plastPwd = new char[strlen(cur_dir)+1];
+        strcpy(new_plastPwd, cur_dir);
+        *plastPwd = new_plastPwd;
+    }
 }
 
 SmallShell::SmallShell() : jobs_list(new JobsList()){}
