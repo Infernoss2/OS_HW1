@@ -2,10 +2,10 @@
 #ifndef SMASH_COMMAND_H_
 #define SMASH_COMMAND_H_
 // #pragma once TODO think about it
-#include <array>
 #include <list>
 #include <utility>
 #include <vector>
+#include <sys/wait.h>
 
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
@@ -14,6 +14,9 @@ class Command {
     char** args = nullptr;
     const char* cmd_name;
     int size_of_args;
+    pid_t pid;
+    std::string cmd_line;
+    bool isBackGround;
 public:
     Command(const char *cmd_line);
 
@@ -25,6 +28,12 @@ public:
     //virtual void cleanup();
     char** getArgs() {return args;}
     int getArgsLength() {return size_of_args;}
+    pid_t getPid() {return pid;}
+    void setPid(pid_t Opid){pid = Opid;}
+    const char* getCmdLine() {return cmd_line.c_str();}
+    std::string getCmdLineStr() {return cmd_line;}
+    void setBackGround(bool background) {isBackGround = background;}
+    bool getIsBackGround() const {return isBackGround;}
     // TODO: Add your extra methods if needed
 };
 
@@ -158,33 +167,143 @@ public:
 class JobsList {
 public:
     class JobEntry {
+    public:
         int job_id;
         Command *command;
+        bool isStopped = false;
+        JobEntry(int jobId, Command *command, bool is_stopped) : job_id(jobId), command(command), isStopped(is_stopped) {}
+        int getJobId() {return job_id;}
     };
-
+    int max_job_id = 1;
     std::list<JobEntry *> jobs;  // head
-    JobEntry *lastJob;
-    int size = jobs.size();
+    // std::list<JobEntry*> jobs_stop;
 public:
-    JobsList();
+    JobsList() : jobs(){}
 
-    ~JobsList();
+    ~JobsList() = default;
 
-    void addJob(Command *cmd, bool isStopped = false); // check if the size greater than 100
+    void addJob(Command *cmd, bool isStopped = false) {  // check if the size greater than 100
+        removeFinishedJobs();
+        if (jobs.size() > 100) { // there is 100 jobs
+            return;
+        }
+        auto job = new JobEntry(max_job_id, cmd, isStopped);
+        jobs.push_back(job);
+        max_job_id++;
+    }
 
-    void printJobsList();
+    void printJobsList() {
+        removeFinishedJobs();
+        for (auto job: jobs) {
+            pid_t pid = job->command->getPid();
+            std::cout << '[' << job->getJobId() << ']' << job->command->getCmdLine() << std::endl;
+        }
+    }
 
-    void killAllJobs();
+    void killAllJobs() {
+        for (auto j : jobs) {
+            pid_t pid = j->command->getPid();
+            std::cout << pid << ": " << j->command->getCmdLine() << std::endl;
 
-    void removeFinishedJobs();
+            if (kill(pid, SIGKILL) == -1) {
+                perror("smash error: kill failed");
+            }
+            delete j->command;
+            delete j;
+        }
+        jobs.clear();
+    }
 
-    JobEntry *getJobById(int jobId);
+    void removeFinishedJobs() {
+        for (auto it =jobs.begin(); it != jobs.end();) {
+            auto j = *it;
+            pid_t pid = j->command->getPid();
+            int status = 0;
+            pid_t result = waitpid(pid, &status, WNOHANG);
+            if (result == 0) {
+                ++it;
+            }
+            if (result == -1) {
+                perror("smash error: waitpid failed"); // TODO maybe we should delete the command
+            } else {
+                if (WIFEXITED(status)|| WIFSIGNALED(status)) {
+                    delete j->command;
+                    delete j;
+                    it = jobs.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+    }
 
-    void removeJobById(int jobId);
+    JobEntry *getJobById(int jobId) {
+        if (jobId <= 0)
+            return nullptr;
+        for (auto j: jobs) {
+            if (j->job_id == jobId)
+                return j;
+        }
+        return nullptr;
+    }
 
-    JobEntry *getLastJob(int *lastJobId);
+    void removeJobById(int jobId) {
+        for (auto it = jobs.begin(); it != jobs.end(); ++it) {
+            auto job = *it;
+            if (job->job_id == jobId) {
+                delete job->command;
+                delete job;
+                it = jobs.erase(it);
+                break;
+            }
+        }
+    }
 
-    JobEntry *getLastStoppedJob(int *jobId);
+    JobEntry *getLastJob(int *lastJobId) {
+        if (getJobsCount() == 0) {
+            if (lastJobId) {
+                *lastJobId = -1;
+            }
+            return nullptr;
+        }
+        int maxId = -1;
+        JobEntry* last = nullptr;
+
+        for (JobEntry* job : jobs) {
+            if (job->job_id > maxId) {
+                maxId = job->job_id;
+                last = job;
+            }
+        }
+        if (lastJobId) {
+            *lastJobId = maxId;
+        }
+        return last;
+    }
+
+    JobEntry *getLastStoppedJob(int *jobId) { // I think we dont need this function because there is no bg function
+        if (getJobsCount() == 0) {
+            if (jobId) {
+                *jobId = -1;
+            }
+            return nullptr;
+        }
+        JobEntry* last = nullptr;
+        int maxId = -1;
+        for (JobEntry* job : jobs) {
+            if (job->job_id > maxId) {
+                last = job;
+                maxId = job->job_id;
+            }
+
+        }
+        if (jobId != nullptr)
+            *jobId = max_job_id;
+        return last;
+    }
+
+    int getJobsCount() {return jobs.size();};
+
 
     // TODO: Add extra methods or modify exisitng ones as needed
 };
@@ -212,12 +331,12 @@ public:
 };
 
 class ForegroundCommand : public BuiltInCommand {
-    // TODO: Add your data members
+    JobsList *F_jobs;
+
 public:
     ForegroundCommand(const char *cmd_line, JobsList *jobs);
 
-    virtual ~ForegroundCommand() {
-    }
+    virtual ~ForegroundCommand() {}
 
     void execute() override;
 };

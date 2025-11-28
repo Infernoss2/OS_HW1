@@ -76,7 +76,7 @@ void _removeBackgroundSign(char *cmd_line) {
 }
 
 // TODO: Add your implementation for classes in Commands.h
-Command::Command(const char *cmd_line){
+Command::Command(const char *cmd_line) :  pid(-1), cmd_line(cmd_line), isBackGround(false){
     args = new char*[COMMAND_MAX_ARGS+1]; // +1 for the null terminator
     for (int i = 0; i < COMMAND_MAX_ARGS+1; i++) {
         args[i] = nullptr;
@@ -100,6 +100,13 @@ BuiltInCommand::BuiltInCommand(const char *cmd_line) : Command(cmd_line) {}
 ShowPidCommand::ShowPidCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
 
 void ShowPidCommand::execute() {
+    pid_t pid;
+    pid = fork();
+    if (pid > 0) {
+
+    }
+    // wait();
+
     std::cout << "smash pid is " << getpid() << std::endl;
 }
 
@@ -143,6 +150,40 @@ void ChangeDirCommand::execute() {
     }
 }
 
+ForegroundCommand::ForegroundCommand(const char *cmd_line, JobsList *jobs) :
+    BuiltInCommand(cmd_line),
+    F_jobs(jobs) {}
+
+void ForegroundCommand::execute() {
+    char** curr_args = getArgs();
+    int argc = getArgsLength();
+    if (argc > 2) {
+        cerr << "smash error: fg: invalid arguments";
+        return;
+    }
+
+    if (argc == 2) {
+        auto job = F_jobs->getJobById(std::stoi(curr_args[1]));
+        if (job == nullptr) {
+            string msg = "smash error: fg: job-id ";
+            msg += curr_args[1];
+            msg += " does not exist";
+            cerr << msg << std::endl;
+            return;
+        }
+        // continue
+    }
+    int *lastJobId = nullptr;
+    if (argc == 1) {
+        if (F_jobs->getLastJob(lastJobId) == nullptr) {
+            string msg = "smash error: fg: jobs list is empty";
+            cerr << msg << std::endl;
+        }
+        // continue
+    }
+    // remove the job from jobs_run
+}
+
 SmallShell::SmallShell() : jobs_list(new JobsList()){}
 
 SmallShell::~SmallShell() {delete jobs_list;}
@@ -150,7 +191,7 @@ SmallShell::~SmallShell() {delete jobs_list;}
 /**
 * Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 */
-Command *SmallShell::CreateCommand(const char *cmd_line) {
+Command *SmallShell::CreateCommand(const char *cmd_line) { // TODO add the & implement
     string cmd_s = _trim(string(cmd_line));
     string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
 
@@ -166,7 +207,7 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
 
     if (firstWord.compare("jobs") == 0) { return new JobsCommand(cmd_line, jobs_list);}
 
-    if (firstWord.compare("fg") == 0) { return new ShowPidCommand(cmd_line);}
+    if (firstWord.compare("fg") == 0) { return new ForegroundCommand(cmd_line, jobs_list);}
 
     if (firstWord.compare("quit") == 0) {return new QuitCommand(cmd_line, jobs_list);}
 
@@ -195,6 +236,10 @@ void SmallShell::executeCommand(const char *cmd_line) {
     Command* cmd = CreateCommand(cmd_line);
     if (cmd == nullptr){return;} // empty command
     // TODO check for external command
+    jobs_list->removeFinishedJobs();
     cmd->execute();
+    if (!cmd->getIsBackGround()) {
+        delete cmd;
+    }
     // Please note that you must fork smash process for some commands (e.g., external commands....)
 }
