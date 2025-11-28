@@ -154,7 +154,7 @@ void ForegroundCommand::execute() {
         cerr << "smash error: fg: invalid arguments" << endl;
         return;
     }
-    JobsList::JobEntry* job ;
+    JobsList::JobEntry* job;
     int jobId = -1;
 
     if (argc == 1) {
@@ -205,6 +205,49 @@ void ForegroundCommand::execute() {
 
     sm.setFgPid(-1);
     sm.setFgCmd(nullptr);
+}
+
+KillCommand::KillCommand(const char* cmd_line , JobsList *jobs) : BuiltInCommand(cmd_line), K_jobs(jobs) {}
+
+void KillCommand::execute() {
+    char** curr_args = getArgs();
+    int argc = getArgsLength();
+    if (argc != 3) {
+        cerr << "smash error: kill: invalid arguments" << endl;
+        return;
+    }
+    const char* signumWithFlag = curr_args[1];
+    const char* target_job_id = curr_args[2];
+
+    if (signumWithFlag[0] != '-' || signumWithFlag[1] == '\0') {
+        cerr << "smash error: kill: invalid arguments" << endl;
+    }
+    for (int i =1; signumWithFlag[i] != '\0'; i++) {
+        if (!isdigit(signumWithFlag[i])) {
+            cerr << "smash error: kill: invalid arguments" << endl;
+            return;
+        }
+    }
+    for (int i =0; target_job_id[i] != '\0'; i++) {
+        if (!isdigit(target_job_id[i])) {
+            cerr << "smash error: kill: invalid arguments" << endl;
+            return;
+        }
+    }
+    int jobId = atoi(target_job_id);
+    JobsList::JobEntry* job = K_jobs->getJobById(jobId);
+    if (job == nullptr) {
+        cerr << "smash error: job-id " << target_job_id << " does not exist" << endl;
+        return;
+    }
+    int signum = atoi(target_job_id+1);
+    pid_t job_pid = job->command->getPid();
+
+    if (kill(job_pid, signum == -1)) {
+        perror("smash error: kill failed");
+    }
+
+    cout << "signal number " << signum << "was sent to pid " << job_pid <<endl;
 }
 
 SmallShell::SmallShell() : jobs_list(new JobsList()){}

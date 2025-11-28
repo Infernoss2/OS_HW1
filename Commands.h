@@ -281,7 +281,7 @@ public:
         return last;
     }
 
-    JobEntry *getLastStoppedJob(int *jobId) { // I think we dont need this function because there is no bg function
+    JobEntry *getLastStoppedJob(int *jobId) { // I think we don't need this function because there is no bg function
         if (getJobsCount() == 0) {
             if (jobId) {
                 *jobId = -1;
@@ -305,7 +305,7 @@ public:
     int getJobsCount() {return jobs.size();};
 
 
-    // TODO: Add extra methods or modify exisitng ones as needed
+    // TODO: Add extra methods or modify existing ones as needed
 };
 
 class JobsCommand : public BuiltInCommand {
@@ -320,7 +320,7 @@ public:
 };
 
 class KillCommand : public BuiltInCommand {
-    // TODO: Add your data members
+    JobsList *K_jobs;
 public:
     KillCommand(const char *cmd_line, JobsList *jobs);
 
