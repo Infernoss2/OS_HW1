@@ -100,13 +100,6 @@ BuiltInCommand::BuiltInCommand(const char *cmd_line) : Command(cmd_line) {}
 ShowPidCommand::ShowPidCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
 
 void ShowPidCommand::execute() {
-    pid_t pid;
-    pid = fork();
-    if (pid > 0) {
-
-    }
-    // wait();
-
     std::cout << "smash pid is " << getpid() << std::endl;
 }
 
@@ -158,30 +151,60 @@ void ForegroundCommand::execute() {
     char** curr_args = getArgs();
     int argc = getArgsLength();
     if (argc > 2) {
-        cerr << "smash error: fg: invalid arguments";
+        cerr << "smash error: fg: invalid arguments" << endl;
         return;
     }
+    JobsList::JobEntry* job ;
+    int jobId = -1;
 
-    if (argc == 2) {
-        auto job = F_jobs->getJobById(std::stoi(curr_args[1]));
+    if (argc == 1) {
+        job = F_jobs->getLastJob(&jobId);
         if (job == nullptr) {
-            string msg = "smash error: fg: job-id ";
-            msg += curr_args[1];
-            msg += " does not exist";
+            string msg = "smash error: fg: jobs list is empty";
             cerr << msg << std::endl;
             return;
         }
-        // continue
-    }
-    int *lastJobId = nullptr;
-    if (argc == 1) {
-        if (F_jobs->getLastJob(lastJobId) == nullptr) {
-            string msg = "smash error: fg: jobs list is empty";
-            cerr << msg << std::endl;
+    }else { // args == 2
+        const char* target = curr_args[1];
+        for (int i =0; target[i] != '\0'; i++) {
+            if (!isdigit(target[i])) {
+                cerr << "smash error: fg: invalid arguments" << endl;
+                return;
+            }
+
+            jobId = atoi(target);
+            job = F_jobs->getLastJob(&jobId);
+            if (job == nullptr) {
+                cerr << "smash error: fg: job-id " << target << "does not exist"<< endl;
+                return;
+            }
         }
-        // continue
     }
-    // remove the job from jobs_run
+
+    pid_t pid = job->command->getPid();
+    std::string cmd_line = job->command->getCmdLineStr();
+    bool stooped = job->isStopped;
+
+    std::cout << cmd_line << " " << pid << endl;
+
+    SmallShell &sm = SmallShell::getInstance();
+    sm.setFgPid(pid);
+    sm.setFgCmd(job->command->getCmdLine());
+
+    if (stooped) {
+        if (kill(pid , SIGCONT) == -1) {
+            perror("smash error: kill failed");
+        }
+    }
+    F_jobs->removeJobById(jobId);
+
+    int status = 0;
+    if (waitpid(pid, &status, WUNTRACED) == -1) {
+        perror("smash error: waitpid failed");
+    }
+
+    sm.setFgPid(-1);
+    sm.setFgCmd(nullptr);
 }
 
 SmallShell::SmallShell() : jobs_list(new JobsList()){}

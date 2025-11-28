@@ -29,7 +29,7 @@ public:
     char** getArgs() {return args;}
     int getArgsLength() {return size_of_args;}
     pid_t getPid() {return pid;}
-    void setPid(pid_t Opid){pid = Opid;}
+    void setPid(pid_t O_pid){pid = O_pid;}
     const char* getCmdLine() {return cmd_line.c_str();}
     std::string getCmdLineStr() {return cmd_line;}
     void setBackGround(bool background) {isBackGround = background;}
@@ -175,8 +175,8 @@ public:
         int getJobId() {return job_id;}
     };
     int max_job_id = 1;
-    std::list<JobEntry *> jobs;  // head
-    // std::list<JobEntry*> jobs_stop;
+private:
+    std::list<JobEntry *> jobs;
 public:
     JobsList() : jobs(){}
 
@@ -386,7 +386,7 @@ private:
     JobsList *jobs_list;
     char *lastPwd = nullptr;
     pid_t fg_pid = -1;
-    char* fg_cmd;
+    const char* fg_cmd;
     SmallShell();
 
 public:
@@ -410,8 +410,7 @@ public:
     void clear_fg_pid() {fg_pid = -1;}
 
     std::string getFgCmd() const {return fg_cmd;}
-    void setFgCmd(char* o_fg_cmd) {fg_cmd = o_fg_cmd;}
-
+    void setFgCmd(const char* o_fg_cmd) {fg_cmd = o_fg_cmd;}
     // TODO: add extra methods as needed
 };
 
