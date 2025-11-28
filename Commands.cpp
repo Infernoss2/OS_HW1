@@ -1,4 +1,5 @@
 #include <unistd.h>
+#include <fcntl.h>
 #include <string.h>
 #include <iostream>
 #include <vector>
@@ -73,6 +74,46 @@ void _removeBackgroundSign(char *cmd_line) {
     cmd_line[idx] = ' ';
     // truncate the command line string up to the last non-space character
     cmd_line[str.find_last_not_of(WHITESPACE, idx) + 1] = 0;
+}
+
+static bool find_env_var(const char* var_name) {
+    int fd = open("/proc/self/environ",O_RDONLY);
+    if (fd == -1) {
+        perror("smash error: open failed");
+        return false;
+    }
+    ssize_t n;
+    char buf[1024];
+    while ((n=read(fd,buf,sizeof(buf))) > 0) {
+        ssize_t i = 0;
+        while (i < n) {
+            char* key = &buf[i];
+            ssize_t j = i;
+            while (j < n && buf[j] != '\0') {
+                j++;
+            }
+            if (j == n) {
+                break;
+            }
+            buf[j] = '\0';
+            char* tmp = strchr(key,'=');
+            if (tmp != nullptr) {
+                *tmp = '\0';
+                if (strcmp(key,var_name) == 0) {
+                    close(fd);
+                    return true;
+                }
+            }
+            i = j + 1;
+        }
+    }
+    if (n == -1) {
+        perror("smash error: read failed");
+        close(fd);
+        return false;
+    }
+    close(fd);
+    return false;
 }
 
 // TODO: Add your implementation for classes in Commands.h
@@ -175,7 +216,7 @@ void ForegroundCommand::execute() {
             jobId = atoi(target);
             job = F_jobs->getLastJob(&jobId);
             if (job == nullptr) {
-                cerr << "smash error: fg: job-id " << target << "does not exist"<< endl;
+                cerr << "smash error: fg: job-id " << target << " does not exist"<< endl;
                 return;
             }
         }
@@ -247,7 +288,29 @@ void KillCommand::execute() {
         perror("smash error: kill failed");
     }
 
-    cout << "signal number " << signum << "was sent to pid " << job_pid <<endl;
+    cout << "signal number " << signum << " was sent to pid " << job_pid <<endl;
+}
+
+UnSetEnvCommand::UnSetEnvCommand(const char* cmd_line) : BuiltInCommand(cmd_line) {}
+
+void UnSetEnvCommand::execute() {
+    char** curr_args = getArgs();
+    int argc = getArgsLength();
+    if (argc == 1) {
+        cerr << "smash error: unsetenv: not enough arguments" << endl;
+        return;
+    }
+    for (int i = 1; i < argc; i++) {
+        const char* var_name = curr_args[i];
+        if (!find_env_var(var_name)) {
+            std::cerr << "smash error: unsetenv: " << var_name << " does not exist" << endl;
+            return;
+        }
+        if (unsetenv(var_name) == -1) {
+            perror("smash error: unsetenv failed");
+            return;
+        }
+    }
 }
 
 SmallShell::SmallShell() : jobs_list(new JobsList()){}
@@ -257,11 +320,11 @@ SmallShell::~SmallShell() {delete jobs_list;}
 /**
 * Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 */
-Command *SmallShell::CreateCommand(const char *cmd_line) { // TODO add the & implement
+Command *SmallShell::CreateCommand(const char *cmd_line) { // TODO add the & implement with the function they gave us
     string cmd_s = _trim(string(cmd_line));
     string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
 
-    if (cmd_line == ""){return nullptr;} // empty command
+    if (cmd_s == ""){return nullptr;} // empty command
 
     if (firstWord.compare("pwd") == 0) {return new GetCurrDirCommand(cmd_line);}
 
