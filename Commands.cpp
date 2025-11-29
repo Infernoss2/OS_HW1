@@ -7,6 +7,7 @@
 #include <sys/wait.h>
 #include <iomanip>
 #include "Commands.h"
+#include <ctime>
 
 #include "../../../../../AppData/Local/Programs/winlibs-x86_64-posix-seh-gcc-15.1.0-mingw-w64msvcrt-12.0.0-r1/mingw64/x86_64-w64-mingw32/include/limits.h"
 
@@ -114,6 +115,66 @@ static bool find_env_var(const char* var_name) {
     }
     close(fd);
     return false;
+}
+
+static bool read_line(const char* path, std::string& out) {
+    int fd = open(path, O_RDONLY);
+    if (fd == -1) {
+        perror("smash error: open failed");
+        return false;
+    }
+    char buf[1024];
+    ssize_t n = read(fd, buf, sizeof(buf)-1);
+    if (n == -1) {
+        perror("smash error: read failed");
+        close(fd);
+        return false;
+    }
+    close(fd);
+    buf[n] = '\0';
+    char* tmp = strchr(buf, '\n');
+    if (tmp != nullptr) {
+        *tmp = '\0';
+    }
+    out.assign(buf);
+    return true;
+}
+
+static bool read_boot_time(time_t &boot_time) {
+    int fd = open("/proc/stat", O_RDONLY);
+    if (fd == -1) {
+        perror("smash error: open failed");
+        return false;
+    }
+    char buf[4096];
+    ssize_t n = read(fd, buf, sizeof(buf)-1);
+    if (n < 0) {
+        perror("smash error: read failed");
+        close(fd);
+        return false;
+    }
+    close(fd);
+    buf[n] = '\0';
+    const char* start_of_boot = strstr(buf, "btime");
+    if (!start_of_boot) {
+        std::cout << "smash error: failed to find btime in /proc/stat" << std::endl;
+        return false;
+    }
+    start_of_boot+= 6; // pass the "btime "
+    long long val = 0;
+    while (*start_of_boot && std::isspace((unsigned char)*start_of_boot)) {
+        ++start_of_boot;
+    }
+    if (!std::isdigit((unsigned char)*start_of_boot)) {
+        std::cout << "smash error: invalid btime format" << std::endl;
+        return false;
+    }
+    while (std::isdigit((unsigned char)*start_of_boot)) {
+        val = val*10 + (*start_of_boot-'0');
+        ++start_of_boot;
+    }
+    boot_time = static_cast<time_t>(val);
+    return true;
 }
 
 // TODO: Add your implementation for classes in Commands.h
@@ -313,7 +374,51 @@ void UnSetEnvCommand::execute() {
     }
 }
 
-SmallShell::SmallShell() : jobs_list(new JobsList()){}
+SysInfoCommand::SysInfoCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
+
+void SysInfoCommand::execute() {
+    std::string system;
+    std::string hostname;
+    std::string kernal;
+
+    if (!read_line("/proc/sys/kernal/ostype",system)) {
+        return;
+    }
+    if (!read_line("/proc/sys/kernal/hostname",hostname)) {
+        return;
+    }
+    if (!read_line("/proc/sys/kernal/osrelease",kernal)) {
+        return;
+    }
+
+    time_t boot_time;
+    if (!read_boot_time(boot_time)) {
+        return;
+    }
+
+    struct tm bt;
+    if (!localtime_r(&boot_time,&bt)) {
+        perror("smash error: localtime_r failed");
+        return;
+    }
+
+    char time_buf[64];
+    if (strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M-%S", &bt) == 0) {
+        perror("smash error: strftime failed");
+        return;
+    }
+
+    cout << endl; //TODO: ask about the format
+    cout << "System: " << system << endl << endl
+         << "Hostname: " << hostname << endl << endl
+         << "Kernel: " << kernal << endl << endl
+         << "Architecture: x86_64" << endl << endl
+         << "Boot Time: " << time_buf << endl << endl;
+
+}
+
+SmallShell::SmallShell() : jobs_list(new JobsList()) {
+}
 
 SmallShell::~SmallShell() {delete jobs_list;}
 
