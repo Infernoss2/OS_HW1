@@ -409,7 +409,12 @@ public:
     void setFgPid(pid_t o_fg_pid) {fg_pid = o_fg_pid;}
     void clear_fg_pid() {fg_pid = -1;}
 
-    std::string getFgCmd() const {return fg_cmd;}
+    std::string getFgCmd() const {
+        if (fg_cmd) {
+            return std::string(fg_cmd);
+        }
+        return std::string();
+    }
     void setFgCmd(const char* o_fg_cmd) {fg_cmd = o_fg_cmd;}
     // TODO: add extra methods as needed
 };

@@ -417,10 +417,11 @@ void SysInfoCommand::execute() {
 
 }
 
-SmallShell::SmallShell() : jobs_list(new JobsList()) {
-}
+SmallShell::SmallShell() : jobs_list(new JobsList()) ,fg_cmd(nullptr) {}
 
-SmallShell::~SmallShell() {delete jobs_list;}
+SmallShell::~SmallShell() {
+    delete jobs_list;
+}
 
 /**
 * Creates and returns a pointer to Command class which matches the given command line (cmd_line)
