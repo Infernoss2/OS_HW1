@@ -10,7 +10,6 @@
 using namespace std;
 
 void ctrlCHandler(int sig_num) {
-    // TODO: Add your implementation
     const char* msg = "smash: got ctrl-C\n"; // maybe without the \n
     write(STDOUT_FILENO, msg, strlen(msg));
 
@@ -18,9 +17,14 @@ void ctrlCHandler(int sig_num) {
     pid_t fg_pid = sm.getFgPid();
 
     if (fg_pid > 0) { // there is a child process
-        std::string info = "smash: process " + std::to_string(fg_pid) + "was killed\n"; // maybe without the \n
-        write(STDOUT_FILENO, info.c_str(), info.size());
-        kill(fg_pid, SIGKILL);
+        if (kill(fg_pid, SIGKILL) == -1) {
+            return;
+        }
+        char buf[1024];
+        int size = snprintf(buf, sizeof(buf), "smash: process %d was killed\n", fg_pid);
+        if (size > 0) {
+            write(STDOUT_FILENO, buf, size);
+        }
         sm.clear_fg_pid();
     }
 }

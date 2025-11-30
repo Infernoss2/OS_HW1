@@ -120,6 +120,7 @@ static bool find_env_var(const char* var_name) {
 static bool read_line(const char* path, std::string& out) {
     int fd = open(path, O_RDONLY);
     if (fd == -1) {
+        cerr << "failed to read: " << path << std::endl;
         perror("smash error: open failed");
         return false;
     }
@@ -143,6 +144,7 @@ static bool read_line(const char* path, std::string& out) {
 static bool read_boot_time(time_t &boot_time) {
     int fd = open("/proc/stat", O_RDONLY);
     if (fd == -1) {
+        cerr << "failed to read: /proc/stat" << std::endl;
         perror("smash error: open failed");
         return false;
     }
@@ -323,6 +325,7 @@ void KillCommand::execute() {
 
     if (signumWithFlag[0] != '-' || signumWithFlag[1] == '\0') {
         cerr << "smash error: kill: invalid arguments" << endl;
+        return;
     }
     for (int i =1; signumWithFlag[i] != '\0'; i++) {
         if (!isdigit(signumWithFlag[i])) {
@@ -347,6 +350,7 @@ void KillCommand::execute() {
 
     if (kill(job_pid, signum == -1)) {
         perror("smash error: kill failed");
+        return;
     }
 
     cout << "signal number " << signum << " was sent to pid " << job_pid <<endl;
@@ -381,13 +385,13 @@ void SysInfoCommand::execute() {
     std::string hostname;
     std::string kernal;
 
-    if (!read_line("/proc/sys/kernal/ostype",system)) {
+    if (!read_line("/proc/sys/kernel/ostype",system)) {
         return;
     }
-    if (!read_line("/proc/sys/kernal/hostname",hostname)) {
+    if (!read_line("/proc/sys/kernel/hostname",hostname)) {
         return;
     }
-    if (!read_line("/proc/sys/kernal/osrelease",kernal)) {
+    if (!read_line("/proc/sys/kernel/osrelease",kernal)) {
         return;
     }
 
@@ -403,7 +407,7 @@ void SysInfoCommand::execute() {
     }
 
     char time_buf[64];
-    if (strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M-%S", &bt) == 0) {
+    if (strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", &bt) == 0) {
         perror("smash error: strftime failed");
         return;
     }
