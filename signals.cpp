@@ -2,9 +2,10 @@
 #include <signal.h>
 #include "signals.h"
 #include <cstring>
-
 #include "Commands.h"
-#include "../../../../../AppData/Local/Programs/winlibs-x86_64-posix-seh-gcc-15.1.0-mingw-w64msvcrt-12.0.0-r1/mingw64/include/c++/15.1.0/bits/this_thread_sleep.h"
+
+// #include "../../../../../AppData/Local/Programs/winlibs-x86_64-posix-seh-gcc-15.1.0-mingw-w64msvcrt-12.0.0-r1/mingw64/include/c++/15.1.0/bits/this_thread_sleep.h"
+#include <unistd.h>   // for sleep
 
 using namespace std;
 
