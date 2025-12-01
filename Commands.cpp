@@ -7,6 +7,8 @@
 #include <sys/wait.h>
 #include <iomanip>
 #include "Commands.h"
+
+#include <cstring>
 #include <ctime>
 #include <limits.h>
 // #include "../../../../../AppData/Local/Programs/winlibs-x86_64-posix-seh-gcc-15.1.0-mingw-w64msvcrt-12.0.0-r1/mingw64/x86_64-w64-mingw32/include/limits.h"
@@ -179,7 +181,6 @@ static bool read_boot_time(time_t &boot_time) {
     return true;
 }
 
-// TODO: Add your implementation for classes in Commands.h
 Command::Command(const char *cmd_line) :  pid(-1), cmd_line(cmd_line), isBackGround(false){
     args = new char*[COMMAND_MAX_ARGS+1]; // +1 for the null terminator
     for (int i = 0; i < COMMAND_MAX_ARGS+1; i++) {
@@ -296,9 +297,7 @@ void ForegroundCommand::execute() {
     sm.setFgCmd(job->command->getCmdLine());
 
     if (stooped) {
-        if (kill(pid , SIGCONT) == -1) {
-            perror("smash error: kill failed");
-        }
+        return;
     }
     F_jobs->removeJobById(jobId);
 
@@ -421,6 +420,49 @@ void SysInfoCommand::execute() {
 
 }
 
+ExternalCommand::ExternalCommand(const char *cmd_line) : Command(cmd_line) {
+    char** curr_args = getArgs();
+    int argc = getArgsLength();
+    for (int i =0; i <  argc; i++) {
+        for (int j = 0; j <strlen(curr_args[i]); j++) {
+            if (curr_args[i][j] == '*' || curr_args[i][j] == '?') {
+                setComplex(true);
+                return;
+            }
+        }
+    }
+}
+
+void ExternalCommand::execute() {
+    char** curr_args = getArgs();
+    char*  cmd = curr_args[0];
+    pid_t pid = fork();
+    if (pid == -1) {
+        perror("smash error: fork failed");
+        return;
+    }
+    if (pid == 0) { // child
+        setpgrp();      // change the group id
+
+        if (!getIsComplex()){
+            if (execvp(cmd, curr_args) == -1) {
+                perror("smash error: execvp failed");
+                _exit(1);
+            }
+        }else {
+            if (execl("/bin/bash","bash", "-c", getCmdLine() ,(char*)nullptr) == -1) {// TODO make sure the cmd line is without the &
+                perror("smash error: execl failed");
+                _exit(1);
+            }
+        }
+
+    }else { // father
+        if (!getIsBackGround()) {
+            waitpid(pid,NULL,0);
+        }
+    }       //TODO implement here what happen
+}
+
 SmallShell::SmallShell() : jobs_list(new JobsList()) ,fg_cmd(nullptr) {}
 
 SmallShell::~SmallShell() {
@@ -430,43 +472,59 @@ SmallShell::~SmallShell() {
 /**
 * Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 */
-Command *SmallShell::CreateCommand(const char *cmd_line) { // TODO add the & implement with the function they gave us
-    string cmd_s = _trim(string(cmd_line));
+Command *SmallShell::CreateCommand(const char *cmd_line) {
+    auto size = std::strlen(cmd_line);
+    char* cmd_copy = new char[size + 1];
+    strcpy(cmd_copy,cmd_line);
+
+    bool isBackGround = _isBackgroundComamnd(cmd_copy);
+    if (isBackGround) {
+        _removeBackgroundSign(cmd_copy);
+    }
+
+    string cmd_s = _trim(string(cmd_copy));
+    delete [] cmd_copy;
+
+    if (cmd_s.empty()) {
+        return nullptr;
+    }
+
     string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
+    const char* cmd_line_withoutBackground = cmd_s.c_str();
 
-    if (cmd_s == ""){return nullptr;} // empty command
+    if (firstWord.compare("pwd") == 0) {return new GetCurrDirCommand(cmd_line_withoutBackground);}
 
-    if (firstWord.compare("pwd") == 0) {return new GetCurrDirCommand(cmd_line);}
+    if (firstWord.compare("showpid") == 0) {return new ShowPidCommand(cmd_line_withoutBackground);}
 
-    if (firstWord.compare("showpid") == 0) {return new ShowPidCommand(cmd_line);}
+    if (firstWord.compare("chprompt") == 0) {return new chpromptCommand(cmd_line_withoutBackground);}
 
-    if (firstWord.compare("chprompt") == 0) {return new chpromptCommand(cmd_line);}
+    if (firstWord.compare("cd") == 0) { return new ChangeDirCommand(cmd_line_withoutBackground, &lastPwd);}
 
-    if (firstWord.compare("cd") == 0) { return new ChangeDirCommand(cmd_line, &lastPwd);}
+    if (firstWord.compare("jobs") == 0) { return new JobsCommand(cmd_line_withoutBackground, jobs_list);}
 
-    if (firstWord.compare("jobs") == 0) { return new JobsCommand(cmd_line, jobs_list);}
+    if (firstWord.compare("fg") == 0) { return new ForegroundCommand(cmd_line_withoutBackground, jobs_list);}
 
-    if (firstWord.compare("fg") == 0) { return new ForegroundCommand(cmd_line, jobs_list);}
+    if (firstWord.compare("quit") == 0) {return new QuitCommand(cmd_line_withoutBackground, jobs_list);}
 
-    if (firstWord.compare("quit") == 0) {return new QuitCommand(cmd_line, jobs_list);}
+    if (firstWord.compare("kill") == 0) {return new KillCommand(cmd_line_withoutBackground, jobs_list);}
 
-    if (firstWord.compare("kill") == 0) {return new KillCommand(cmd_line, jobs_list);}
+    if (firstWord.compare("alias") == 0) {return new AliasCommand(cmd_line_withoutBackground);}
 
-    if (firstWord.compare("alias") == 0) {return new AliasCommand(cmd_line);}
+    if (firstWord.compare("unalias") == 0) {return new UnAliasCommand(cmd_line_withoutBackground);}
 
-    if (firstWord.compare("unalias") == 0) {return new UnAliasCommand(cmd_line);}
+    if (firstWord.compare("unsetenv") == 0) { return new UnSetEnvCommand(cmd_line_withoutBackground);}
 
-    if (firstWord.compare("unsetenv") == 0) { return new UnSetEnvCommand(cmd_line);}
+    if (firstWord.compare("sysinfo") == 0) { return new SysInfoCommand(cmd_line_withoutBackground);}
 
-    if (firstWord.compare("sysinfo") == 0) { return new SysInfoCommand(cmd_line);}
+    if (firstWord.compare("du") == 0){return new DiskUsageCommand(cmd_line_withoutBackground);}
 
-    if (firstWord.compare("du")){return new DiskUsageCommand(cmd_line);}
-
-    if (firstWord.compare("whoami")){return new WhoAmICommand(cmd_line);}
+    if (firstWord.compare("whoami") == 0){return new WhoAmICommand(cmd_line_withoutBackground);}
 
     // if (firstWord.compare("usbinfo")){return new USBInfoCommand(cmd_line);} // bonus
 
-    return new ExternalCommand(cmd_line);
+    auto c = new ExternalCommand(cmd_line_withoutBackground);
+    c->setBackGround(isBackGround);
+    return c;
 
     return nullptr;
 }
@@ -474,7 +532,6 @@ Command *SmallShell::CreateCommand(const char *cmd_line) { // TODO add the & imp
 void SmallShell::executeCommand(const char *cmd_line) {
     Command* cmd = CreateCommand(cmd_line);
     if (cmd == nullptr){return;} // empty command
-    // TODO check for external command
     jobs_list->removeFinishedJobs();
     cmd->execute();
     if (!cmd->getIsBackGround()) {

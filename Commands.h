@@ -34,7 +34,6 @@ public:
     std::string getCmdLineStr() {return cmd_line;}
     void setBackGround(bool background) {isBackGround = background;}
     bool getIsBackGround() const {return isBackGround;}
-    // TODO: Add your extra methods if needed
 };
 
 class BuiltInCommand : public Command {
@@ -48,13 +47,17 @@ public:
 };
 
 class ExternalCommand : public Command {
+    bool complex = false;
 public:
     ExternalCommand(const char *cmd_line);
 
-    virtual ~ExternalCommand() {
-    }
+    virtual ~ExternalCommand() {}
 
     void execute() override;
+
+    bool getIsComplex() const {return complex;}
+
+    void setComplex(bool O_complex) {complex = O_complex;}
 };
 
                             // special commands
