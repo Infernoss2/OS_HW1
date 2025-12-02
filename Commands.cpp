@@ -486,6 +486,63 @@ void ExternalCommand::execute() {
     }
 }
 
+RedirectionCommand::RedirectionCommand(const char *cmd_line) : Command(cmd_line), is_append(false) {
+    setBackGround(false);
+    std::string tmp = getCleanCmdLineStr();
+    size_t s = tmp.find_first_of('>');
+    cmd_command = _trim(tmp.substr(0, s));
+    if (s+1 < tmp.size() && tmp[s+1] == '>') {
+        is_append = true;
+        file_name = _trim(tmp.substr(s+2));
+    }else {
+        file_name = _trim(tmp.substr(s+1));
+    }
+}
+
+void RedirectionCommand::execute() {
+    int saved_stdout = dup(STDOUT_FILENO);
+    if (saved_stdout == -1) {
+        perror("smash error: dup failed");
+        return;
+    }
+
+    int flags = O_WRONLY | O_CREAT | (is_append? O_APPEND : O_TRUNC);
+    int fd = open(file_name.c_str(), flags, 0666);
+    if (fd == -1) {
+        perror("smash error: open failed");
+        close(saved_stdout);
+        return;
+    }
+    if (dup2(fd,STDOUT_FILENO) == -1) {
+        perror("smash error: dup2 failed");
+        close(fd);
+        dup2(saved_stdout,STDOUT_FILENO);
+        close(saved_stdout);
+        return;
+    }
+    close(fd);      // cout of the command is fd aka the file we want
+
+    SmallShell &smash = SmallShell::getInstance();
+    Command* cmd = smash.CreateCommand(cmd_command.c_str());
+    if (cmd != nullptr) {
+        cmd->execute();
+        delete cmd;
+    }
+    if (dup2(saved_stdout,STDOUT_FILENO) == -1) {
+        perror("smash error: dup2 failed");
+    }
+    close (saved_stdout);
+}
+
+PipeCommand::PipeCommand(const char *cmd_line) : Command(cmd_line)  {
+
+}
+
+void PipeCommand::execute() {
+    
+}
+
+
 SmallShell::SmallShell() : jobs_list(new JobsList()) ,fg_cmd(nullptr) {}
 
 SmallShell::~SmallShell() {
@@ -502,6 +559,10 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
     }
     size_t pos = cmd_s.find_first_of(" \n&");
     std::string firstWord = cmd_s.substr(0, pos);
+
+    if (cmd_s.find('>') != std::string::npos) {return new RedirectionCommand(cmd_line);}
+
+    if (cmd_s.find('|') != std::string::npos) {return new PipeCommand(cmd_line);}
 
     if (firstWord.compare("pwd") == 0) {return new GetCurrDirCommand(cmd_line);}
 

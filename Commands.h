@@ -34,6 +34,7 @@ public:
     const char* getCmdLine() {return cmd_line.c_str();}
     const char* getCleanCmdLine() {return clean_cmd_line.c_str();}
     std::string getCmdLineStr() {return cmd_line;}
+    std::string getCleanCmdLineStr() {return clean_cmd_line;}
     void setBackGround(bool background) {isBackGround = background;}
     bool getIsBackGround() const {return isBackGround;}
 };
@@ -65,12 +66,14 @@ public:
                             // special commands
 
 class RedirectionCommand : public Command {
-    // TODO: Add your data members
+    std::string cmd_command;
+    std::string file_name;
+    bool is_append;
+
 public:
     explicit RedirectionCommand(const char *cmd_line);
 
-    virtual ~RedirectionCommand() {
-    }
+    virtual ~RedirectionCommand() {}
 
     void execute() override;
 };
