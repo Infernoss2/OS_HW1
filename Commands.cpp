@@ -181,12 +181,20 @@ static bool read_boot_time(time_t &boot_time) {
     return true;
 }
 
-Command::Command(const char *cmd_line) :  pid(-1), cmd_line(cmd_line), isBackGround(false){
+Command::Command(const char *O_cmd_line) :  pid(-1), cmd_line(O_cmd_line), isBackGround(false){
+    if (_isBackgroundComamnd(cmd_line.c_str())) {
+        isBackGround = true;
+        std::string tmp = cmd_line;
+        _removeBackgroundSign(&tmp[0]);
+        clean_cmd_line = _trim(tmp);
+    }else {
+        clean_cmd_line = _trim(cmd_line);
+    }
     args = new char*[COMMAND_MAX_ARGS+1]; // +1 for the null terminator
     for (int i = 0; i < COMMAND_MAX_ARGS+1; i++) {
         args[i] = nullptr;
     }
-    size_of_args = _parseCommandLine(cmd_line, args);
+    size_of_args = _parseCommandLine(clean_cmd_line.c_str(), args);
     cmd_name = args[0];
 }
 
@@ -437,6 +445,8 @@ void ExternalCommand::execute() {
     char** curr_args = getArgs();
     char*  cmd = curr_args[0];
     pid_t pid = fork();
+    auto &smash = SmallShell::getInstance();
+    auto *jobs = smash.getJobsList();
     if (pid == -1) {
         perror("smash error: fork failed");
         return;
@@ -450,17 +460,30 @@ void ExternalCommand::execute() {
                 _exit(1);
             }
         }else {
-            if (execl("/bin/bash","bash", "-c", getCmdLine() ,(char*)nullptr) == -1) {// TODO make sure the cmd line is without the &
+            if (execl("/bin/bash","bash", "-c", getCmdLine() ,(char*)nullptr) == -1) {
                 perror("smash error: execl failed");
                 _exit(1);
             }
         }
-
-    }else { // father
-        if (!getIsBackGround()) {
-            waitpid(pid,NULL,0);
+    }
+    else { // father
+        setPid(pid);        // set command pid
+        if (!getIsBackGround()) { // foreground command
+            smash.setFgPid(pid);
+            smash.setFgCmd(getCmdLine());
+            if (waitpid(pid,NULL,0)== -1) {
+                perror("smash error: waitpid failed");
+                return;
+            }
+            smash.clear_fg_pid();
+            smash.setFgCmd(nullptr);
         }
-    }       //TODO implement here what happen
+        else {
+            if (jobs) {
+                jobs->addJob(this);
+            }
+        }
+    }
 }
 
 SmallShell::SmallShell() : jobs_list(new JobsList()) ,fg_cmd(nullptr) {}
@@ -473,58 +496,44 @@ SmallShell::~SmallShell() {
 * Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 */
 Command *SmallShell::CreateCommand(const char *cmd_line) {
-    auto size = std::strlen(cmd_line);
-    char* cmd_copy = new char[size + 1];
-    strcpy(cmd_copy,cmd_line);
-
-    bool isBackGround = _isBackgroundComamnd(cmd_copy);
-    if (isBackGround) {
-        _removeBackgroundSign(cmd_copy);
-    }
-
-    string cmd_s = _trim(string(cmd_copy));
-    delete [] cmd_copy;
-
+    std::string cmd_s = _trim(std::string(cmd_line));
     if (cmd_s.empty()) {
         return nullptr;
     }
+    size_t pos = cmd_s.find_first_of(" \n&");
+    std::string firstWord = cmd_s.substr(0, pos);
 
-    string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
-    const char* cmd_line_withoutBackground = cmd_s.c_str();
+    if (firstWord.compare("pwd") == 0) {return new GetCurrDirCommand(cmd_line);}
 
-    if (firstWord.compare("pwd") == 0) {return new GetCurrDirCommand(cmd_line_withoutBackground);}
+    if (firstWord.compare("showpid") == 0) {return new ShowPidCommand(cmd_line);}
 
-    if (firstWord.compare("showpid") == 0) {return new ShowPidCommand(cmd_line_withoutBackground);}
+    if (firstWord.compare("chprompt") == 0) {return new chpromptCommand(cmd_line);}
 
-    if (firstWord.compare("chprompt") == 0) {return new chpromptCommand(cmd_line_withoutBackground);}
+    if (firstWord.compare("cd") == 0) { return new ChangeDirCommand(cmd_line, &lastPwd);}
 
-    if (firstWord.compare("cd") == 0) { return new ChangeDirCommand(cmd_line_withoutBackground, &lastPwd);}
+    if (firstWord.compare("jobs") == 0) { return new JobsCommand(cmd_line, jobs_list);}
 
-    if (firstWord.compare("jobs") == 0) { return new JobsCommand(cmd_line_withoutBackground, jobs_list);}
+    if (firstWord.compare("fg") == 0) { return new ForegroundCommand(cmd_line, jobs_list);}
 
-    if (firstWord.compare("fg") == 0) { return new ForegroundCommand(cmd_line_withoutBackground, jobs_list);}
+    if (firstWord.compare("quit") == 0) {return new QuitCommand(cmd_line, jobs_list);}
 
-    if (firstWord.compare("quit") == 0) {return new QuitCommand(cmd_line_withoutBackground, jobs_list);}
+    if (firstWord.compare("kill") == 0) {return new KillCommand(cmd_line, jobs_list);}
 
-    if (firstWord.compare("kill") == 0) {return new KillCommand(cmd_line_withoutBackground, jobs_list);}
+    if (firstWord.compare("alias") == 0) {return new AliasCommand(cmd_line);}
 
-    if (firstWord.compare("alias") == 0) {return new AliasCommand(cmd_line_withoutBackground);}
+    if (firstWord.compare("unalias") == 0) {return new UnAliasCommand(cmd_line);}
 
-    if (firstWord.compare("unalias") == 0) {return new UnAliasCommand(cmd_line_withoutBackground);}
+    if (firstWord.compare("unsetenv") == 0) { return new UnSetEnvCommand(cmd_line);}
 
-    if (firstWord.compare("unsetenv") == 0) { return new UnSetEnvCommand(cmd_line_withoutBackground);}
+    if (firstWord.compare("sysinfo") == 0) { return new SysInfoCommand(cmd_line);}
 
-    if (firstWord.compare("sysinfo") == 0) { return new SysInfoCommand(cmd_line_withoutBackground);}
+    if (firstWord.compare("du") == 0){return new DiskUsageCommand(cmd_line);}
 
-    if (firstWord.compare("du") == 0){return new DiskUsageCommand(cmd_line_withoutBackground);}
-
-    if (firstWord.compare("whoami") == 0){return new WhoAmICommand(cmd_line_withoutBackground);}
+    if (firstWord.compare("whoami") == 0){return new WhoAmICommand(cmd_line);}
 
     // if (firstWord.compare("usbinfo")){return new USBInfoCommand(cmd_line);} // bonus
 
-    auto c = new ExternalCommand(cmd_line_withoutBackground);
-    c->setBackGround(isBackGround);
-    return c;
+    return new ExternalCommand(cmd_line);
 
     return nullptr;
 }

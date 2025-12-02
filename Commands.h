@@ -16,6 +16,7 @@ class Command {
     int size_of_args;
     pid_t pid;
     std::string cmd_line;
+    std::string clean_cmd_line; // without & and spaces at the start and end
     bool isBackGround;
 public:
     Command(const char *cmd_line);
@@ -183,11 +184,18 @@ private:
 public:
     JobsList() : jobs(){}
 
-    ~JobsList() = default;
+    ~JobsList() {
+        for (auto j : jobs) {
+            delete j->command;
+            delete j;
+        }
+        jobs.clear();
+    }
 
     void addJob(Command *cmd, bool isStopped = false) {  // check if the size greater than 100
         removeFinishedJobs();
-        if (jobs.size() > 100) { // there is 100 jobs
+        if (jobs.size() >= 100) { // there is 100 jobs
+            delete cmd;
             return;
         }
         auto job = new JobEntry(max_job_id, cmd, isStopped);
@@ -198,8 +206,7 @@ public:
     void printJobsList() {
         removeFinishedJobs();
         for (auto job: jobs) {
-            pid_t pid = job->command->getPid();
-            std::cout << '[' << job->getJobId() << ']' << job->command->getCmdLine() << std::endl;
+            std::cout << '[' << job->getJobId() << "] " << job->command->getCmdLine() << std::endl;
         }
     }
 
@@ -226,8 +233,11 @@ public:
             if (result == 0) {
                 ++it;
             }
-            if (result == -1) {
-                perror("smash error: waitpid failed"); // TODO maybe we should delete the command
+            else if (result == -1) {
+                perror("smash error: waitpid failed");
+                delete j->command;
+                delete j;
+                it = jobs.erase(it);
             } else {
                 if (WIFEXITED(status)|| WIFSIGNALED(status)) {
                     delete j->command;
@@ -241,6 +251,7 @@ public:
     }
 
     JobEntry *getJobById(int jobId) {
+        removeFinishedJobs();
         if (jobId <= 0)
             return nullptr;
         for (auto j: jobs) {
@@ -306,9 +317,6 @@ public:
     }
 
     int getJobsCount() {return jobs.size();};
-
-
-    // TODO: Add extra methods or modify existing ones as needed
 };
 
 class JobsCommand : public BuiltInCommand {
@@ -419,7 +427,8 @@ public:
         return std::string();
     }
     void setFgCmd(const char* o_fg_cmd) {fg_cmd = o_fg_cmd;}
-    // TODO: add extra methods as needed
+
+    JobsList *getJobsList() {return jobs_list;}
 };
 
 #endif //SMASH_COMMAND_H_
