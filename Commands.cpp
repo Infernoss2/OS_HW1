@@ -460,7 +460,7 @@ void ExternalCommand::execute() {
                 _exit(1);
             }
         }else {
-            if (execl("/bin/bash","bash", "-c", getCmdLine() ,(char*)nullptr) == -1) {
+            if (execl("/bin/bash","bash", "-c", getCleanCmdLine() ,(char*)nullptr) == -1) {
                 perror("smash error: execl failed");
                 _exit(1);
             }

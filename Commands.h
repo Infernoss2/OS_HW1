@@ -32,6 +32,7 @@ public:
     pid_t getPid() {return pid;}
     void setPid(pid_t O_pid){pid = O_pid;}
     const char* getCmdLine() {return cmd_line.c_str();}
+    const char* getCleanCmdLine() {return clean_cmd_line.c_str();}
     std::string getCmdLineStr() {return cmd_line;}
     void setBackGround(bool background) {isBackGround = background;}
     bool getIsBackGround() const {return isBackGround;}
