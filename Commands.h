@@ -79,7 +79,9 @@ public:
 };
 
 class PipeCommand : public Command {
-    // TODO: Add your data members
+    std::string first_command;
+    std::string second_command;
+    bool isError;
 public:
     PipeCommand(const char *cmd_line);
 

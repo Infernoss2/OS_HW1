@@ -419,7 +419,7 @@ void SysInfoCommand::execute() {
         return;
     }
 
-    cout << endl; //TODO: ask about the format
+    cout << endl;
     cout << "System: " << system << endl << endl
          << "Hostname: " << hostname << endl << endl
          << "Kernel: " << kernal << endl << endl
@@ -534,12 +534,89 @@ void RedirectionCommand::execute() {
     close (saved_stdout);
 }
 
-PipeCommand::PipeCommand(const char *cmd_line) : Command(cmd_line)  {
-
+PipeCommand::PipeCommand(const char *cmd_line) : Command(cmd_line), isError(false)  {
+    setBackGround(false);
+    std::string tmp = getCleanCmdLineStr();
+    size_t s = tmp.find_first_of('|');
+    first_command = _trim(tmp.substr(0, s));
+    if (s+1 < tmp.size() && tmp[s+1] == '&') {
+        isError = true;
+        second_command = _trim(tmp.substr(s+2));
+    }else {
+        second_command = _trim(tmp.substr(s+1));
+    }
 }
 
 void PipeCommand::execute() {
-    
+    SmallShell &smash = SmallShell::getInstance();
+    int pipefd[2];
+    if (pipe(pipefd) == -1) {
+        perror("smash error: pipe failed");
+        return;
+    }
+
+    pid_t cmd1_pid = fork();
+    if (cmd1_pid == -1) {
+        perror("smash error: fork failed");
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return;
+    }
+    if (cmd1_pid == 0) { // child 1
+        if (!isError) {
+            if (dup2(pipefd[1],STDOUT_FILENO)== -1) {
+                perror("smash error: dup2 failed");
+                close(pipefd[1]);
+                close(pipefd[0]);
+                return;
+            }
+        }else {
+            if (dup2(pipefd[1],STDERR_FILENO)==-1) {
+                perror("smash error: dup2 failed");
+                close(pipefd[1]);
+                close(pipefd[0]);
+                return;
+            }
+        }
+
+        Command* cmd = smash.CreateCommand(first_command.c_str());
+        if (cmd != nullptr) {
+            cmd->execute();
+            delete cmd;
+        }
+        close(pipefd[1]);
+        close(pipefd[0]);
+        _exit(0);
+    }
+
+    pid_t cmd2_pid = fork();
+    if (cmd2_pid == -1) {
+        perror("smash error: fork failed");
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return;
+    }
+    if (cmd2_pid == 0) {    // child 2
+        if (dup2(pipefd[0],STDIN_FILENO) == -1) {
+            perror("smash error: dup2 failed");
+            close(pipefd[0]);
+            close(pipefd[1]);
+            return;
+        }
+        Command* cmd2 = smash.CreateCommand(second_command.c_str());
+        if (cmd2 != nullptr) {
+            cmd2->execute();
+            delete cmd2;
+        }
+        close(pipefd[0]);
+        close(pipefd[1]);
+        _exit(0);
+    }
+    // parent
+    close(pipefd[0]);
+    close(pipefd[1]);
+    waitpid(cmd1_pid,NULL,0);
+    waitpid(cmd2_pid,NULL,0);
 }
 
 
