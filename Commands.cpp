@@ -352,10 +352,10 @@ void KillCommand::execute() {
         cerr << "smash error: job-id " << target_job_id << " does not exist" << endl;
         return;
     }
-    int signum = atoi(target_job_id+1);
+    int signum = atoi(signumWithFlag+1);
     pid_t job_pid = job->command->getPid();
 
-    if (kill(job_pid, signum == -1)) {
+    if (kill(job_pid, signum) == -1) {
         perror("smash error: kill failed");
         return;
     }
@@ -568,24 +568,24 @@ void PipeCommand::execute() {
                 perror("smash error: dup2 failed");
                 close(pipefd[1]);
                 close(pipefd[0]);
-                return;
+                _exit(1);
             }
         }else {
             if (dup2(pipefd[1],STDERR_FILENO)==-1) {
                 perror("smash error: dup2 failed");
                 close(pipefd[1]);
                 close(pipefd[0]);
-                return;
+                _exit(1);
             }
         }
+        close(pipefd[0]);
+        close(pipefd[1]);
 
         Command* cmd = smash.CreateCommand(first_command.c_str());
         if (cmd != nullptr) {
             cmd->execute();
             delete cmd;
         }
-        close(pipefd[1]);
-        close(pipefd[0]);
         _exit(0);
     }
 
@@ -601,15 +601,16 @@ void PipeCommand::execute() {
             perror("smash error: dup2 failed");
             close(pipefd[0]);
             close(pipefd[1]);
-            return;
+            _exit(1);
         }
+        close(pipefd[0]);
+        close(pipefd[1]);
+
         Command* cmd2 = smash.CreateCommand(second_command.c_str());
         if (cmd2 != nullptr) {
             cmd2->execute();
             delete cmd2;
         }
-        close(pipefd[0]);
-        close(pipefd[1]);
         _exit(0);
     }
     // parent
@@ -641,33 +642,33 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
 
     if (cmd_s.find('|') != std::string::npos) {return new PipeCommand(cmd_line);}
 
-    if (firstWord.compare("pwd") == 0) {return new GetCurrDirCommand(cmd_line);}
+    // if (firstWord.compare("pwd") == 0) {return new GetCurrDirCommand(cmd_line);}
 
     if (firstWord.compare("showpid") == 0) {return new ShowPidCommand(cmd_line);}
 
-    if (firstWord.compare("chprompt") == 0) {return new chpromptCommand(cmd_line);}
+    // if (firstWord.compare("chprompt") == 0) {return new chpromptCommand(cmd_line);}
 
     if (firstWord.compare("cd") == 0) { return new ChangeDirCommand(cmd_line, &lastPwd);}
 
-    if (firstWord.compare("jobs") == 0) { return new JobsCommand(cmd_line, jobs_list);}
+    // if (firstWord.compare("jobs") == 0) { return new JobsCommand(cmd_line, jobs_list);}
 
     if (firstWord.compare("fg") == 0) { return new ForegroundCommand(cmd_line, jobs_list);}
 
-    if (firstWord.compare("quit") == 0) {return new QuitCommand(cmd_line, jobs_list);}
+    // if (firstWord.compare("quit") == 0) {return new QuitCommand(cmd_line, jobs_list);}
 
     if (firstWord.compare("kill") == 0) {return new KillCommand(cmd_line, jobs_list);}
 
-    if (firstWord.compare("alias") == 0) {return new AliasCommand(cmd_line);}
+    // if (firstWord.compare("alias") == 0) {return new AliasCommand(cmd_line);}
 
-    if (firstWord.compare("unalias") == 0) {return new UnAliasCommand(cmd_line);}
+    // if (firstWord.compare("unalias") == 0) {return new UnAliasCommand(cmd_line);}
 
     if (firstWord.compare("unsetenv") == 0) { return new UnSetEnvCommand(cmd_line);}
 
     if (firstWord.compare("sysinfo") == 0) { return new SysInfoCommand(cmd_line);}
 
-    if (firstWord.compare("du") == 0){return new DiskUsageCommand(cmd_line);}
+    // if (firstWord.compare("du") == 0){return new DiskUsageCommand(cmd_line);}
 
-    if (firstWord.compare("whoami") == 0){return new WhoAmICommand(cmd_line);}
+    // if (firstWord.compare("whoami") == 0){return new WhoAmICommand(cmd_line);}
 
     // if (firstWord.compare("usbinfo")){return new USBInfoCommand(cmd_line);} // bonus
 
