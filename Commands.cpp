@@ -355,12 +355,13 @@ void KillCommand::execute() {
     int signum = atoi(signumWithFlag+1);
     pid_t job_pid = job->command->getPid();
 
+    cout << "signal number " << signum << " was sent to pid " << job_pid <<endl;
+
     if (kill(job_pid, signum) == -1) {
         perror("smash error: kill failed");
         return;
     }
 
-    cout << "signal number " << signum << " was sent to pid " << job_pid <<endl;
 }
 
 UnSetEnvCommand::UnSetEnvCommand(const char* cmd_line) : BuiltInCommand(cmd_line) {}
