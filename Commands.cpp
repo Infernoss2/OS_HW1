@@ -2,15 +2,20 @@
 #include <fcntl.h>
 #include <string.h>
 #include <iostream>
-#include <vector>
+#include <fstream>
 #include <sstream>
+#include <vector>
 #include <sys/wait.h>
 #include <iomanip>
 #include "Commands.h"
-
 #include <cstring>
 #include <ctime>
 #include <limits.h>
+#include <regex>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+
+
 // #include "../../../../../AppData/Local/Programs/winlibs-x86_64-posix-seh-gcc-15.1.0-mingw-w64msvcrt-12.0.0-r1/mingw64/x86_64-w64-mingw32/include/limits.h"
 
 using namespace std;
@@ -26,6 +31,7 @@ const std::string WHITESPACE = " \n\r\t\f\v";
 #else
 #define FUNC_ENTRY()
 #define FUNC_EXIT()
+#define BUFFER_SIZE (8192) //8KB
 #endif
 
 string _ltrim(const std::string &s) {
@@ -181,7 +187,8 @@ static bool read_boot_time(time_t &boot_time) {
     return true;
 }
 
-Command::Command(const char *O_cmd_line) :  pid(-1), cmd_line(O_cmd_line), isBackGround(false){
+Command::Command(string O_cmd_line, string org_cmd_line) :  pid(-1), cmd_line(O_cmd_line),
+                original_cmd_line(org_cmd_line), isBackGround(false){
     if (_isBackgroundComamnd(cmd_line.c_str())) {
         isBackGround = true;
         std::string tmp = cmd_line;
@@ -190,8 +197,8 @@ Command::Command(const char *O_cmd_line) :  pid(-1), cmd_line(O_cmd_line), isBac
     }else {
         clean_cmd_line = _trim(cmd_line);
     }
-    args = new char*[COMMAND_MAX_ARGS+1]; // +1 for the null terminator
-    for (int i = 0; i < COMMAND_MAX_ARGS+1; i++) {
+    args = new char*[COMMAND_MAX_ARGS + 1]; // + 1 for cmd_name
+    for (int i = 0; i < COMMAND_MAX_ARGS + 1; i++) {
         args[i] = nullptr;
     }
     size_of_args = _parseCommandLine(clean_cmd_line.c_str(), args);
@@ -208,22 +215,43 @@ Command::~Command() {
     }
 }
 
-BuiltInCommand::BuiltInCommand(const char *cmd_line) : Command(cmd_line) {}
+BuiltInCommand::BuiltInCommand(string cmd_line, string org_cmd_line) : Command(cmd_line, org_cmd_line) {}
 
-ShowPidCommand::ShowPidCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
+chpromptCommand::chpromptCommand(string cmd_line, string org_cmd_line) : BuiltInCommand(cmd_line, org_cmd_line) {}
+
+void chpromptCommand::execute() {
+    if (this->getArgsLength() == 0) {
+        return;
+    }
+    char* newPrompt = this->getArgs()[0];
+    SmallShell::getInstance().setPrompt(newPrompt);
+}
+
+ShowPidCommand::ShowPidCommand(string cmd_line, string org_cmd_line) : BuiltInCommand(cmd_line, org_cmd_line) {}
+
 
 void ShowPidCommand::execute() {
     std::cout << "smash pid is " << getpid() << std::endl;
 }
 
-ChangeDirCommand::ChangeDirCommand(const char *cmd_line, char **plastPWD) :
-    BuiltInCommand(cmd_line),
+GetCurrDirCommand::GetCurrDirCommand(string cmd_line, string org_cmd_line) : BuiltInCommand(cmd_line, org_cmd_line) {}
+
+void GetCurrDirCommand::execute() {
+    char buff[PATH_MAX];
+    char* current_dir = getcwd(buff, PATH_MAX);
+    if (current_dir != nullptr) {
+        std::cout << current_dir << std::endl;
+    }
+}
+
+ChangeDirCommand::ChangeDirCommand(string cmd_line, string org_cmd_line,  char **plastPWD) :
+    BuiltInCommand(cmd_line, org_cmd_line),
     plastPwd(plastPWD) {}
 
 void ChangeDirCommand::execute() {
     char** cur_args = getArgs();
     int argc = getArgsLength();
-    if (argc == 1) //cd without anything
+    if (argc == 1) //cd without args
         return;
     if (argc > 2) {
         std::cerr << "smash error: cd: too many arguments" << std::endl;
@@ -235,6 +263,9 @@ void ChangeDirCommand::execute() {
         perror("smash error: getcwd failed");
         return;
     }
+
+    // SmallShell &sm = SmallShell::getInstance();
+    // char* last_pwd = sm.getLastPwd();
 
     if (strcmp(cur_args[1], "-") == 0) {
         if (plastPwd == nullptr || *plastPwd == nullptr) {
@@ -256,8 +287,16 @@ void ChangeDirCommand::execute() {
     }
 }
 
-ForegroundCommand::ForegroundCommand(const char *cmd_line, JobsList *jobs) :
-    BuiltInCommand(cmd_line),
+JobsCommand::JobsCommand(string cmd_line, string org_cmd_line) : BuiltInCommand(cmd_line, org_cmd_line) {}
+
+void JobsCommand::execute() {
+    JobsList* jobs_list = SmallShell::getInstance().getJobsList();
+    jobs_list->removeFinishedJobs();
+    jobs_list->printJobsList();
+}
+
+ForegroundCommand::ForegroundCommand(string cmd_line, string org_cmd_line, JobsList *jobs) :
+    BuiltInCommand(cmd_line, org_cmd_line),
     F_jobs(jobs) {}
 
 void ForegroundCommand::execute() {
@@ -277,7 +316,8 @@ void ForegroundCommand::execute() {
             cerr << msg << std::endl;
             return;
         }
-    }else { // args == 2
+    }
+    else { // args == 2
         const char* target = curr_args[1];
         for (int i =0; target[i] != '\0'; i++) {
             if (!isdigit(target[i])) {
@@ -294,6 +334,7 @@ void ForegroundCommand::execute() {
         }
     }
 
+    //not sure that job is the current job
     pid_t pid = job->command->getPid();
     std::string cmd_line = job->command->getCmdLineStr();
     bool stooped = job->isStopped;
@@ -318,7 +359,19 @@ void ForegroundCommand::execute() {
     sm.setFgCmd(nullptr);
 }
 
-KillCommand::KillCommand(const char* cmd_line , JobsList *jobs) : BuiltInCommand(cmd_line), K_jobs(jobs) {}
+
+QuitCommand::QuitCommand(string cmd_line, string org_cmd_line) : BuiltInCommand(cmd_line, org_cmd_line) {}
+
+void QuitCommand::execute() {
+    int argc = getArgsLength();
+    if (argc >= 2) {
+        SmallShell &sm = SmallShell::getInstance();
+        sm.getJobsList()->killAllJobs();
+    }
+    exit(0);
+}
+
+KillCommand::KillCommand(string cmd_line, string org_cmd_line, JobsList *jobs) : BuiltInCommand(cmd_line, org_cmd_line), K_jobs(jobs) {}
 
 void KillCommand::execute() {
     char** curr_args = getArgs();
@@ -355,16 +408,61 @@ void KillCommand::execute() {
     int signum = atoi(signumWithFlag+1);
     pid_t job_pid = job->command->getPid();
 
-    cout << "signal number " << signum << " was sent to pid " << job_pid <<endl;
-
     if (kill(job_pid, signum) == -1) {
         perror("smash error: kill failed");
         return;
     }
 
+    cout << "signal number " << signum << " was sent to pid " << job_pid <<endl;
 }
 
-UnSetEnvCommand::UnSetEnvCommand(const char* cmd_line) : BuiltInCommand(cmd_line) {}
+AliasCommand::AliasCommand(string cmd_line, string org_cmd_line) : BuiltInCommand(cmd_line, org_cmd_line) {}
+
+void AliasCommand::execute() {
+    string cmd_line = this->getCmdLine();
+    int argc = getArgsLength();
+
+    if (argc == 1) {
+        SmallShell::getInstance().printAliases();
+        return;
+    }
+
+    std::smatch match_results;
+    static const regex pattern(R"(^alias ([a-zA-Z0-9_]+)='([^']*)'$)");
+    if (!regex_match(cmd_line, match_results, pattern) || match_results.size() != 3) {
+        cerr << "smash error: alias: invalid alias format" << endl;
+        return;
+    }
+
+    string name = match_results[1];
+    string command = match_results[2];
+    SmallShell &sm = SmallShell::getInstance();
+    if (!sm.isValidAliasName(name)) {
+        cerr << "smash error: alias: " << name << "already exists or is a reserved command" << endl;
+    }
+    sm.addAlias(name, command);
+}
+
+UnAliasCommand::UnAliasCommand(string cmd_line, string org_cmd_line) : BuiltInCommand(cmd_line, org_cmd_line) {}
+
+void UnAliasCommand::execute() {
+    SmallShell &sm = SmallShell::getInstance();
+    char** args = getArgs();
+    int argc = getArgsLength();
+    if (argc == 1) {
+        cerr << "smash error: unalias: not enough arguments" << endl;
+    }
+    for (int i =1; i < argc; i++) {
+        pair<string, string>* curr_alias = sm.findAlias(args[i]);
+        if (curr_alias == nullptr) {
+            cerr << "smash error: unalias: " << args[i] << " alias does not exist" << endl;
+            return;
+        }
+        sm.removeAlias(args[i]);
+    }
+}
+
+UnSetEnvCommand::UnSetEnvCommand(string cmd_line, string org_cmd_line) : BuiltInCommand(cmd_line, org_cmd_line) {}
 
 void UnSetEnvCommand::execute() {
     char** curr_args = getArgs();
@@ -386,7 +484,7 @@ void UnSetEnvCommand::execute() {
     }
 }
 
-SysInfoCommand::SysInfoCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
+SysInfoCommand::SysInfoCommand(string cmd_line, string org_cmd_line) : BuiltInCommand(cmd_line, org_cmd_line) {}
 
 void SysInfoCommand::execute() {
     std::string system;
@@ -429,7 +527,7 @@ void SysInfoCommand::execute() {
 
 }
 
-ExternalCommand::ExternalCommand(const char *cmd_line) : Command(cmd_line) {
+ExternalCommand::ExternalCommand(string cmd_line, string org_cmd_line) : Command(cmd_line, org_cmd_line) {
     char** curr_args = getArgs();
     int argc = getArgsLength();
     for (int i =0; i <  argc; i++) {
@@ -487,7 +585,8 @@ void ExternalCommand::execute() {
     }
 }
 
-RedirectionCommand::RedirectionCommand(const char *cmd_line) : Command(cmd_line), is_append(false) {
+RedirectionCommand::RedirectionCommand(string cmd_line, string org_cmd_line) :
+                                        Command(cmd_line, cmd_line), is_append(false) {
     setBackGround(false);
     std::string tmp = getCleanCmdLineStr();
     size_t s = tmp.find_first_of('>');
@@ -535,7 +634,7 @@ void RedirectionCommand::execute() {
     close (saved_stdout);
 }
 
-PipeCommand::PipeCommand(const char *cmd_line) : Command(cmd_line), isError(false)  {
+PipeCommand::PipeCommand(string cmd_line, string org_cmd_line) : Command(cmd_line, org_cmd_line), isError(false)  {
     setBackGround(false);
     std::string tmp = getCleanCmdLineStr();
     size_t s = tmp.find_first_of('|');
@@ -621,6 +720,163 @@ void PipeCommand::execute() {
     waitpid(cmd2_pid,NULL,0);
 }
 
+DiskUsageCommand::DiskUsageCommand(string cmd_line, string org_cmd_line)
+                                    : Command(cmd_line, org_cmd_line) {}
+
+off_t getFileSize(const string &file_path) {
+    struct stat st{};
+    if (lstat(file_path.c_str(), &st) == -1) {
+        perror("smash error: lstat failed");
+        return -1;
+    }
+    return (st.st_blocks * 512);
+}
+
+off_t getDiskUsage(const string& dir_path) {
+    int fd = open(dir_path.c_str(), O_RDONLY | O_DIRECTORY); //getdents64 receives fd of an open file.
+    if (fd == -1) {
+        perror("smash error: open failed");
+        return -1;
+    }
+
+    off_t total_disk_usage = getFileSize(dir_path);
+    if (total_disk_usage == -1) {
+        return -1;
+    }
+    char buffer[BUFFER_SIZE];
+    int bytes_read;
+    while (true) {
+        bytes_read = syscall(SYS_getdents64, fd, buffer, BUFFER_SIZE);
+        if (bytes_read == 0) { // No more entries
+            break;
+        }
+        else if (bytes_read == -1) {
+            perror("smash error: getdents64 failed");
+            return -1;
+        }
+        int pos = 0;
+        while (pos < bytes_read) {
+            struct linux_dirent64* current_file = (struct linux_dirent64*)(buffer + pos);
+            string name = current_file->d_name;
+
+            if (name == "." || name == "..") {
+                pos += current_file->d_reclen;
+                continue;
+            }
+
+            string fullPath = dir_path + "/" + name;
+            if (current_file->d_type == DT_DIR) {
+                off_t additional_disk_usage = getDiskUsage(fullPath);
+                if (additional_disk_usage == -1) {
+                    return -1;
+                }
+                total_disk_usage += additional_disk_usage;
+            }
+            else {
+                off_t additional_disk_usage = getFileSize(fullPath);
+                if (additional_disk_usage == -1) { //lstat failed
+                    return -1;
+                }
+                total_disk_usage += additional_disk_usage;
+            }
+            pos += current_file->d_reclen;
+        }
+    }
+    if (close(fd) == -1){
+        perror("smash error: close failed");
+        return -1;
+    }
+
+    return total_disk_usage;
+}
+
+void DiskUsageCommand::execute() {
+    cout <<"$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$ 1" << endl;
+    char** args = getArgs();
+    int argv = getArgsLength();
+    if (argv > 2) {
+        cerr << "smash error: du: too many arguments" << endl;
+    }
+    char cur_dir[PATH_MAX];
+    if (argv == 1) {
+        if (getcwd(cur_dir, PATH_MAX) == nullptr) {
+            perror("smash error: getcwd failed");
+            return;
+        }
+    }
+    else {
+        strcpy(cur_dir, args[1]);
+    }
+    cout <<"$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$ 2" << endl;
+    off_t total_disk_usage = getDiskUsage(cur_dir); //by bytes
+    if (total_disk_usage != -1) {
+        off_t total_disk_usage_rounded = (total_disk_usage + 1023) / 1024;
+        cout <<"Total disk usage: " << total_disk_usage_rounded << " KB" << endl;
+    }
+    cout <<"$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$ 3" << total_disk_usage << endl;
+}
+
+WhoAmICommand::WhoAmICommand(string cmd_line, string org_cmd_line) : Command(cmd_line, org_cmd_line) {}
+
+void WhoAmICommand::execute() {
+    uid_t uid = getuid();
+    gid_t gid = getgid();
+    string str_uid = to_string(uid);
+    string str_gid = to_string(gid);
+    string user_name;
+    string home_dir;
+
+    const char* PASSWD_PATH = "/etc/passwd";
+    char buffer[1024]; //1KB
+    ssize_t bytes_read = 0;
+    bool foundUser = false;
+    string curr_line;
+    string trimmed_str;
+
+    int fd = open(PASSWD_PATH, O_RDONLY);
+    if (fd == -1) {
+        perror("smash error: open failed");
+    }
+    while ((bytes_read = read(fd, buffer, sizeof(buffer))) > 0) {
+        string updated_buffer = trimmed_str.append(buffer, bytes_read);
+        size_t new_line_pos;
+        while ((new_line_pos = updated_buffer.find('\n')) != string::npos) {
+            curr_line = updated_buffer.substr(0, new_line_pos);
+            updated_buffer.erase(0, new_line_pos + 1);
+
+            string curr_user_info[7];
+            for (int i = 0; i < 7; i++) {
+                size_t colon_pos = curr_line.find(':');
+                if (colon_pos == string::npos) {    //shell_path, last field of current user
+                    curr_user_info[i] = curr_line;
+                    break;
+                }
+                curr_user_info[i] = curr_line.substr(0, colon_pos);
+                curr_line = curr_line.substr(colon_pos + 1);
+            }
+            if (curr_user_info[2] == str_uid) {
+                user_name = curr_user_info[0];
+                home_dir = curr_user_info[5];
+                foundUser = true;
+            }
+        }
+        if (foundUser == true) {
+            break;
+        }
+        trimmed_str = updated_buffer;
+    }
+    if (bytes_read == -1) {
+        perror("smash error: read failed");
+    }
+
+    close(fd);
+
+    cout << user_name << endl;
+    cout << str_uid << endl;
+    cout << str_gid << endl;
+    cout << home_dir << endl;
+}
+
 
 SmallShell::SmallShell() : jobs_list(new JobsList()) ,fg_cmd(nullptr) {}
 
@@ -631,49 +887,56 @@ SmallShell::~SmallShell() {
 /**
 * Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 */
-Command *SmallShell::CreateCommand(const char *cmd_line) {
+Command *SmallShell::CreateCommand(string cmd_line) {
     std::string cmd_s = _trim(std::string(cmd_line));
     if (cmd_s.empty()) {
         return nullptr;
     }
     size_t pos = cmd_s.find_first_of(" \n&");
     std::string firstWord = cmd_s.substr(0, pos);
+    SmallShell &sm = SmallShell::getInstance();
+    string original_cmd_line = cmd_line;
 
-    if (cmd_s.find('>') != std::string::npos) {return new RedirectionCommand(cmd_line);}
+    pair<string, string>* alias = sm.findAlias(firstWord);
+    if (alias != nullptr) {
+        cmd_line = sm.restoreCmd(alias->second, cmd_line); //cmd_line contains the full command (before alias)
+    }
 
-    if (cmd_s.find('|') != std::string::npos) {return new PipeCommand(cmd_line);}
+    if (cmd_s.find('>') != std::string::npos) {return new RedirectionCommand(cmd_line, original_cmd_line);}
 
-    // if (firstWord.compare("pwd") == 0) {return new GetCurrDirCommand(cmd_line);}
+    if (cmd_s.find('|') != std::string::npos) {return new PipeCommand(cmd_line, original_cmd_line);}
 
-    if (firstWord.compare("showpid") == 0) {return new ShowPidCommand(cmd_line);}
+    if (firstWord.compare("pwd") == 0) {return new GetCurrDirCommand(cmd_line, original_cmd_line);}
 
-    // if (firstWord.compare("chprompt") == 0) {return new chpromptCommand(cmd_line);}
+    if (firstWord.compare("showpid") == 0) {return new ShowPidCommand(cmd_line, original_cmd_line);}
 
-    if (firstWord.compare("cd") == 0) { return new ChangeDirCommand(cmd_line, &lastPwd);}
+    if (firstWord.compare("chprompt") == 0) {return new chpromptCommand(cmd_line, original_cmd_line);}
 
-    // if (firstWord.compare("jobs") == 0) { return new JobsCommand(cmd_line, jobs_list);}
+    if (firstWord.compare("cd") == 0) { return new ChangeDirCommand(cmd_line, original_cmd_line, &lastPwd);}
 
-    if (firstWord.compare("fg") == 0) { return new ForegroundCommand(cmd_line, jobs_list);}
+    if (firstWord.compare("jobs") == 0) { return new JobsCommand(cmd_line, original_cmd_line);}
 
-    // if (firstWord.compare("quit") == 0) {return new QuitCommand(cmd_line, jobs_list);}
+    if (firstWord.compare("fg") == 0) { return new ForegroundCommand(cmd_line, original_cmd_line, jobs_list);}
 
-    if (firstWord.compare("kill") == 0) {return new KillCommand(cmd_line, jobs_list);}
+    if (firstWord.compare("quit") == 0) {return new QuitCommand(cmd_line, original_cmd_line);}
 
-    // if (firstWord.compare("alias") == 0) {return new AliasCommand(cmd_line);}
+    if (firstWord.compare("kill") == 0) {return new KillCommand(cmd_line, original_cmd_line, jobs_list);}
 
-    // if (firstWord.compare("unalias") == 0) {return new UnAliasCommand(cmd_line);}
+    if (firstWord.compare("alias") == 0) {return new AliasCommand(cmd_line, original_cmd_line);}
 
-    if (firstWord.compare("unsetenv") == 0) { return new UnSetEnvCommand(cmd_line);}
+     if (firstWord.compare("unalias") == 0) {return new UnAliasCommand(cmd_line, original_cmd_line);}
 
-    if (firstWord.compare("sysinfo") == 0) { return new SysInfoCommand(cmd_line);}
+    if (firstWord.compare("unsetenv") == 0) { return new UnSetEnvCommand(cmd_line, original_cmd_line);}
 
-    // if (firstWord.compare("du") == 0){return new DiskUsageCommand(cmd_line);}
+    if (firstWord.compare("sysinfo") == 0) { return new SysInfoCommand(cmd_line, original_cmd_line);}
 
-    // if (firstWord.compare("whoami") == 0){return new WhoAmICommand(cmd_line);}
+    if (firstWord.compare("du") == 0){return new DiskUsageCommand(cmd_line, original_cmd_line);}
 
-    // if (firstWord.compare("usbinfo")){return new USBInfoCommand(cmd_line);} // bonus
+    if (firstWord.compare("whoami") == 0){return new WhoAmICommand(cmd_line, original_cmd_line);}
 
-    return new ExternalCommand(cmd_line);
+    // if (firstWord.compare("usbinfo")){return new USBInfoCommand(cmd_line, original_cmd_line);} // bonus
+
+    return new ExternalCommand(cmd_line, original_cmd_line);
 
     return nullptr;
 }
