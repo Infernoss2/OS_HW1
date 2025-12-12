@@ -85,6 +85,19 @@ void _removeBackgroundSign(char *cmd_line) {
     cmd_line[str.find_last_not_of(WHITESPACE, idx) + 1] = 0;
 }
 
+bool findUnquotedToken(const string& cmd_line, const string& token) {
+    bool there_is_quote = false;
+    for (int i = 0; i < cmd_line.length(); i++) {
+        if (cmd_line[i] == '\'') {
+            there_is_quote = !there_is_quote;
+            continue;
+        }
+        if (there_is_quote == false && cmd_line.compare(i, token.length(), token) == 0)
+            return true;
+    }
+    return false;
+}
+
 static bool find_env_var(const char* var_name) {
     int fd = open("/proc/self/environ",O_RDONLY);
     if (fd == -1) {
@@ -302,6 +315,7 @@ ForegroundCommand::ForegroundCommand(string cmd_line, string org_cmd_line, JobsL
     F_jobs(jobs) {}
 
 void ForegroundCommand::execute() {
+    F_jobs->removeFinishedJobs();
     char** curr_args = getArgs();
     int argc = getArgsLength();
     if (argc > 2) {
@@ -309,7 +323,7 @@ void ForegroundCommand::execute() {
         return;
     }
     JobsList::JobEntry* job;
-    int jobId = -1;
+    int jobId;
 
     if (argc == 1) {
         job = F_jobs->getLastJob(&jobId);
@@ -326,19 +340,17 @@ void ForegroundCommand::execute() {
                 cerr << "smash error: fg: invalid arguments" << endl;
                 return;
             }
-
-            jobId = atoi(target);
-            job = F_jobs->getLastJob(&jobId);
-            if (job == nullptr) {
-                cerr << "smash error: fg: job-id " << target << " does not exist"<< endl;
-                return;
-            }
+        }
+        jobId = stoi(curr_args[1]);
+        job = F_jobs->getJobById(jobId);
+        if (job == nullptr) {
+            cerr << "smash error: fg: job-id " << jobId << " does not exist"<< endl;
+            return;
         }
     }
 
-    //not sure that job is the current job
     pid_t pid = job->command->getPid();
-    std::string cmd_line = job->command->getCmdLineStr();
+    std::string cmd_line = _trim(job->command->getCmdLineStr());
     bool stooped = job->isStopped;
 
     std::cout << cmd_line << " " << pid << endl;
@@ -365,6 +377,8 @@ void ForegroundCommand::execute() {
 QuitCommand::QuitCommand(string cmd_line, string org_cmd_line) : BuiltInCommand(cmd_line, org_cmd_line) {}
 
 void QuitCommand::execute() {
+    JobsList* jobs_list = SmallShell::getInstance().getJobsList();
+    jobs_list->removeFinishedJobs();
     int argc = getArgsLength();
     if (argc >= 2) {
         SmallShell &sm = SmallShell::getInstance();
@@ -376,6 +390,7 @@ void QuitCommand::execute() {
 KillCommand::KillCommand(string cmd_line, string org_cmd_line, JobsList *jobs) : BuiltInCommand(cmd_line, org_cmd_line), K_jobs(jobs) {}
 
 void KillCommand::execute() {
+    K_jobs->removeFinishedJobs();
     char** curr_args = getArgs();
     int argc = getArgsLength();
     if (argc != 3) {
@@ -421,17 +436,17 @@ void KillCommand::execute() {
 AliasCommand::AliasCommand(string cmd_line, string org_cmd_line) : BuiltInCommand(cmd_line, org_cmd_line) {}
 
 void AliasCommand::execute() {
-    string cmd_line = this->getCmdLine();
-    int argc = getArgsLength();
+    string cmd_line = _trim(this->getCmdLine());
+    // int argc = getArgsLength();
 
-    if (argc == 1) {
+    if (cmd_line == "alias") {
         SmallShell::getInstance().printAliases();
         return;
     }
 
     std::smatch match_results;
     static const regex pattern(R"(^alias ([a-zA-Z0-9_]+)='([^']*)'$)");
-    if (!regex_match(cmd_line, match_results, pattern) || match_results.size() != 3) {
+    if (!regex_match(cmd_line, match_results, pattern)) {
         cerr << "smash error: alias: invalid alias format" << endl;
         return;
     }
@@ -440,7 +455,8 @@ void AliasCommand::execute() {
     string command = match_results[2];
     SmallShell &sm = SmallShell::getInstance();
     if (!sm.isValidAliasName(name)) {
-        cerr << "smash error: alias: " << name << "already exists or is a reserved command" << endl;
+        cerr << "smash error: alias: " << name << " already exists or is a reserved command" << endl;
+        return;
     }
     sm.addAlias(name, command);
 }
@@ -453,6 +469,7 @@ void UnAliasCommand::execute() {
     int argc = getArgsLength();
     if (argc == 1) {
         cerr << "smash error: unalias: not enough arguments" << endl;
+        return;
     }
     for (int i =1; i < argc; i++) {
         pair<string, string>* curr_alias = sm.findAlias(args[i]);
@@ -491,7 +508,7 @@ SysInfoCommand::SysInfoCommand(string cmd_line, string org_cmd_line) : BuiltInCo
 void SysInfoCommand::execute() {
     std::string system;
     std::string hostname;
-    std::string kernal;
+    std::string kernel;
 
     if (!read_line("/proc/sys/kernel/ostype",system)) {
         return;
@@ -499,7 +516,7 @@ void SysInfoCommand::execute() {
     if (!read_line("/proc/sys/kernel/hostname",hostname)) {
         return;
     }
-    if (!read_line("/proc/sys/kernel/osrelease",kernal)) {
+    if (!read_line("/proc/sys/kernel/osrelease",kernel)) {
         return;
     }
 
@@ -520,13 +537,11 @@ void SysInfoCommand::execute() {
         return;
     }
 
-    cout << endl;
-    cout << "System: " << system << endl << endl
-         << "Hostname: " << hostname << endl << endl
-         << "Kernel: " << kernal << endl << endl
-         << "Architecture: x86_64" << endl << endl
-         << "Boot Time: " << time_buf << endl << endl;
-
+    cout << "System: " << system << endl
+         << "Hostname: " << hostname << endl
+         << "Kernel: " << kernel << endl
+         << "Architecture: x86_64" << endl
+         << "Boot Time: " << time_buf << endl;
 }
 
 ExternalCommand::ExternalCommand(string cmd_line, string org_cmd_line) : Command(cmd_line, org_cmd_line) {
@@ -813,6 +828,7 @@ void DiskUsageCommand::execute() {
     int argv = getArgsLength();
     if (argv > 2) {
         cerr << "smash error: du: too many arguments" << endl;
+        return;
     }
     char cur_dir[PATH_MAX];
     if (argv == 1) {
@@ -829,7 +845,6 @@ void DiskUsageCommand::execute() {
         off_t total_disk_usage_rounded = (total_disk_usage + 1023) / 1024;
         cout <<"Total disk usage: " << total_disk_usage_rounded << " KB" << endl;
     }
-    cout << total_disk_usage << endl;
 }
 
 WhoAmICommand::WhoAmICommand(string cmd_line, string org_cmd_line) : Command(cmd_line, org_cmd_line) {}
@@ -882,6 +897,7 @@ void WhoAmICommand::execute() {
         trimmed_str = updated_buffer;
     }
     if (bytes_read == -1) {
+        close(fd);
         perror("smash error: read failed");
     }
 
@@ -918,9 +934,9 @@ Command *SmallShell::CreateCommand(string cmd_line) {
         cmd_line = sm.restoreCmd(alias->second, cmd_line); //cmd_line contains the full command (before alias)
     }
 
-    if (cmd_s.find('>') != std::string::npos) {return new RedirectionCommand(cmd_line, original_cmd_line);}
+    if (findUnquotedToken(cmd_line ,">") == true) {return new RedirectionCommand(cmd_line, original_cmd_line);}
 
-    if (cmd_s.find('|') != std::string::npos) {return new PipeCommand(cmd_line, original_cmd_line);}
+    if (findUnquotedToken(cmd_line ,"|") == true) {return new PipeCommand(cmd_line, original_cmd_line);}
 
     if (firstWord.compare("pwd") == 0) {return new GetCurrDirCommand(cmd_line, original_cmd_line);}
 

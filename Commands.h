@@ -251,6 +251,7 @@ public:
 
     //lastJobId will hold the maximum Job ID found in the list, -1 if the list is empty.
     JobEntry *getLastJob(int *lastJobId) {
+        removeFinishedJobs();
         if (getJobsCount() == 0) {
             if (lastJobId) {
                 *lastJobId = -1;
