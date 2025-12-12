@@ -6,20 +6,34 @@
 #include <utility>
 #include <vector>
 #include <sys/wait.h>
+#include <algorithm>
+#include <cstdint>
+#include <dirent.h>
+
+using namespace std;
 
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
+
+struct linux_dirent64 {
+    uint64_t d_ino;
+    int64_t  d_off;
+    uint16_t d_reclen;
+    uint8_t  d_type;
+    char     d_name[256];
+};
 
 class Command {
     char** args = nullptr;
     const char* cmd_name;
     int size_of_args;
     pid_t pid;
-    std::string cmd_line;
+    std::string cmd_line; //cmd line that contains the full command (before alias)
+    std::string original_cmd_line;
     std::string clean_cmd_line; // without & and spaces at the start and end
     bool isBackGround;
 public:
-    Command(const char *cmd_line);
+    Command(string cmd_line, string org_cmd_line);
 
     virtual ~Command();
 
@@ -32,6 +46,7 @@ public:
     pid_t getPid() {return pid;}
     void setPid(pid_t O_pid){pid = O_pid;}
     const char* getCmdLine() {return cmd_line.c_str();}
+    const char* getOriginalCmdLine() {return original_cmd_line.c_str();}
     const char* getCleanCmdLine() {return clean_cmd_line.c_str();}
     std::string getCmdLineStr() {return cmd_line;}
     std::string getCleanCmdLineStr() {return clean_cmd_line;}
@@ -41,7 +56,7 @@ public:
 
 class BuiltInCommand : public Command {
 public:
-    BuiltInCommand(const char *cmd_line);
+    BuiltInCommand(string cmd_line, string org_cmd_line);
 
     virtual ~BuiltInCommand() {
     }
@@ -52,7 +67,7 @@ public:
 class ExternalCommand : public Command {
     bool complex = false;
 public:
-    ExternalCommand(const char *cmd_line);
+    ExternalCommand(string cmd_line, string org_cmd_line);
 
     virtual ~ExternalCommand() {}
 
@@ -71,7 +86,7 @@ class RedirectionCommand : public Command {
     bool is_append;
 
 public:
-    explicit RedirectionCommand(const char *cmd_line);
+    explicit RedirectionCommand(string cmd_line, string org_cmd_line);
 
     virtual ~RedirectionCommand() {}
 
@@ -83,7 +98,7 @@ class PipeCommand : public Command {
     std::string second_command;
     bool isError;
 public:
-    PipeCommand(const char *cmd_line);
+    PipeCommand(string cmd_line, string org_cmd_line);
 
     virtual ~PipeCommand() {
     }
@@ -93,17 +108,21 @@ public:
 
 class DiskUsageCommand : public Command {
 public:
-    DiskUsageCommand(const char *cmd_line);
+    DiskUsageCommand(string cmd_line, string org_cmd_line);
 
-    virtual ~DiskUsageCommand() {
-    }
+    virtual ~DiskUsageCommand() {}
 
     void execute() override;
+
+    static off_t getFileSize(const string& file_path){}
+
+    static off_t getDiskUsage(const string& dir_path){}
+
 };
 
 class WhoAmICommand : public Command {
 public:
-    WhoAmICommand(const char *cmd_line);
+    WhoAmICommand(string cmd_line, string org_cmd_line);
 
     virtual ~WhoAmICommand() {
     }
@@ -114,7 +133,7 @@ public:
 class USBInfoCommand : public Command {
     // TODO: Add your data members **BONUS: 10 Points**
 public:
-    USBInfoCommand(const char *cmd_line);
+    USBInfoCommand(string cmd_line, string org_cmd_line);
 
     virtual ~USBInfoCommand() {
     }
@@ -122,57 +141,6 @@ public:
     void execute() override;
 };
 
-class ChangeDirCommand : public BuiltInCommand {
-    char** plastPwd;
-public:
-    ChangeDirCommand(const char *cmd_line, char **plastPwd);
-
-    virtual ~ChangeDirCommand() {}
-
-    void execute() override;
-};
-
-class GetCurrDirCommand : public BuiltInCommand {
-public:
-    GetCurrDirCommand(const char *cmd_line);
-
-    virtual ~GetCurrDirCommand() {
-    }
-
-    void execute() override;
-};
-
-class ShowPidCommand : public BuiltInCommand {
-public:
-    ShowPidCommand(const char *cmd_line);
-
-    virtual ~ShowPidCommand() {
-    }
-
-    void execute() override;
-};
-
-class chpromptCommand : public BuiltInCommand {
-public:
-    chpromptCommand(const char *cmd_line);
-
-    virtual ~chpromptCommand() {}
-
-    void execute() override;
-};
-
-class JobsList;
-
-class QuitCommand : public BuiltInCommand {
-    // TODO: Add your data members
-public:
-    QuitCommand(const char *cmd_line, JobsList *jobs);
-
-    virtual ~QuitCommand() {
-    }
-
-    void execute() override;
-};
 
 class JobsList {
 public:
@@ -198,13 +166,13 @@ public:
         jobs.clear();
     }
 
-    void addJob(Command *cmd, bool isStopped = false) {  // check if the size greater than 100
+    void addJob(Command *cmd) {  // check if the size greater than 100
         removeFinishedJobs();
         if (jobs.size() >= 100) { // there is 100 jobs
             delete cmd;
             return;
         }
-        auto job = new JobEntry(max_job_id, cmd, isStopped);
+        auto job = new JobEntry(max_job_id, cmd, false);
         jobs.push_back(job);
         max_job_id++;
     }
@@ -212,15 +180,16 @@ public:
     void printJobsList() {
         removeFinishedJobs();
         for (auto job: jobs) {
-            std::cout << '[' << job->getJobId() << "] " << job->command->getCmdLine() << std::endl;
+            std::cout << '[' << job->getJobId() << "] " << job->command->getOriginalCmdLine() << std::endl;
         }
     }
 
     void killAllJobs() {
+        removeFinishedJobs();
+        std::cout << "smash: sending SIGKILL signal to " << jobs.size() << " jobs:" << std::endl;
         for (auto j : jobs) {
             pid_t pid = j->command->getPid();
             std::cout << pid << ": " << j->command->getCmdLine() << std::endl;
-
             if (kill(pid, SIGKILL) == -1) {
                 perror("smash error: kill failed");
             }
@@ -279,6 +248,8 @@ public:
         }
     }
 
+
+    //lastJobId will hold the maximum Job ID found in the list, -1 if the list is empty.
     JobEntry *getLastJob(int *lastJobId) {
         if (getJobsCount() == 0) {
             if (lastJobId) {
@@ -322,13 +293,53 @@ public:
         return last;
     }
 
-    int getJobsCount() {return jobs.size();};
+    int getJobsCount() {return jobs.size();}
+};
+
+
+class chpromptCommand : public BuiltInCommand {
+public:
+    chpromptCommand(string cmd_line, string org_cmd_line);
+
+    virtual ~chpromptCommand() {}
+
+    void execute() override;
+};
+
+class ShowPidCommand : public BuiltInCommand {
+public:
+    ShowPidCommand(string cmd_line, string org_cmd_line);
+
+    virtual ~ShowPidCommand() {
+    }
+
+    void execute() override;
+};
+
+class GetCurrDirCommand : public BuiltInCommand {
+public:
+    GetCurrDirCommand(string cmd_line, string org_cmd_line);
+
+    virtual ~GetCurrDirCommand() {
+    }
+
+    void execute() override;
+};
+
+
+class ChangeDirCommand : public BuiltInCommand {
+    char** plastPwd;
+public:
+    ChangeDirCommand(string cmd_line, string org_cmd_line, char **plastPwd);
+
+    virtual ~ChangeDirCommand() {}
+
+    void execute() override;
 };
 
 class JobsCommand : public BuiltInCommand {
-    // TODO: Add your data members
 public:
-    JobsCommand(const char *cmd_line, JobsList *jobs);
+    JobsCommand(string cmd_line, string org_cmd_line);
 
     virtual ~JobsCommand() {
     }
@@ -336,10 +347,34 @@ public:
     void execute() override;
 };
 
+
+class ForegroundCommand : public BuiltInCommand {
+    JobsList *F_jobs;
+
+public:
+    ForegroundCommand(string cmd_line, string org_cmd_line, JobsList *jobs);
+
+    virtual ~ForegroundCommand() {}
+
+    void execute() override;
+};
+
+
+class QuitCommand : public BuiltInCommand {
+public:
+    QuitCommand(string cmd_line, string org_cmd_line);
+
+    virtual ~QuitCommand() {
+    }
+
+    void execute() override;
+};
+
+
 class KillCommand : public BuiltInCommand {
     JobsList *K_jobs;
 public:
-    KillCommand(const char *cmd_line, JobsList *jobs);
+    KillCommand(string cmd_line, string org_cmd_line, JobsList *jobs);
 
     virtual ~KillCommand() {
     }
@@ -347,20 +382,10 @@ public:
     void execute() override;
 };
 
-class ForegroundCommand : public BuiltInCommand {
-    JobsList *F_jobs;
-
-public:
-    ForegroundCommand(const char *cmd_line, JobsList *jobs);
-
-    virtual ~ForegroundCommand() {}
-
-    void execute() override;
-};
 
 class AliasCommand : public BuiltInCommand {
 public:
-    AliasCommand(const char *cmd_line);
+    AliasCommand(string cmd_line, string org_cmd_line);
 
     virtual ~AliasCommand() {
     }
@@ -370,7 +395,7 @@ public:
 
 class UnAliasCommand : public BuiltInCommand {
 public:
-    UnAliasCommand(const char *cmd_line);
+    UnAliasCommand(string cmd_line, string org_cmd_line);
 
     virtual ~UnAliasCommand() {
     }
@@ -380,7 +405,7 @@ public:
 
 class UnSetEnvCommand : public BuiltInCommand {
 public:
-    UnSetEnvCommand(const char *cmd_line);
+    UnSetEnvCommand(string cmd_line, string org_cmd_line);
 
     virtual ~UnSetEnvCommand() {
     }
@@ -390,7 +415,7 @@ public:
 
 class SysInfoCommand : public BuiltInCommand {
 public:
-    SysInfoCommand(const char *cmd_line);
+    SysInfoCommand(string cmd_line, string org_cmd_line);
 
     virtual ~SysInfoCommand() {
     }
@@ -400,14 +425,17 @@ public:
 
 class SmallShell {
 private:
+    string prompt = "smash> ";
     JobsList *jobs_list;
     char *lastPwd = nullptr;
     pid_t fg_pid = -1;
     const char* fg_cmd;
+    list<pair<string, string>> aliases;
+
     SmallShell();
 
 public:
-    Command *CreateCommand(const char *cmd_line);
+    Command *CreateCommand(string cmd_line);
 
     SmallShell(SmallShell const &) = delete; // disable copy ctor
     void operator=(SmallShell const &) = delete; // disable = operator
@@ -419,6 +447,76 @@ public:
     }
 
     ~SmallShell();
+
+    string getPrompt() const {
+        return prompt;
+    }
+
+    char* getLastPwd() const {
+        return lastPwd;
+    }
+
+    void setPrompt(char* newPrompt) {
+        prompt = string(newPrompt);
+    }
+
+    list<pair<string, string>>  getAliases() const {
+        return aliases;
+    }
+
+    bool isValidAliasName(const std::string& name) {
+
+        //Making sure it isn't used
+        for ( auto& alias : aliases )
+            if (alias.first == name) return false;
+
+        //Making sure it isn't reserved keyword
+        vector<string> reservedKeywords = {"chprompt", "showpid", "pwd", "cd", "jobs", "fg"
+        , "quit", "kill", "alias", "unalias", "unsetenv", "sysinfo", "du", "whoami"
+        , "usbinfo"};
+
+        for (auto& resWord : reservedKeywords)
+            if (resWord == name) return false;
+
+        return true;
+    }
+
+    void addAlias(string name, string original_cmd) {
+        if (isValidAliasName(name))
+            aliases.push_back(make_pair(name, original_cmd));
+    }
+
+
+    pair<string, string>* findAlias(string name) {
+        for (auto& alias : aliases) {
+            if (alias.first == name) return &alias;
+        }
+        return nullptr;
+    }
+
+    void removeAlias(string name) {
+        auto it = find_if(aliases.begin(), aliases.end(),
+                          [&name](const pair<string, string>& p) {return (p.first == name);});
+        if (it != aliases.end()) {
+            aliases.erase(it);
+        }
+    }
+
+    string restoreCmd(string alias_command, string cmd_line) {
+        size_t pos = cmd_line.find_first_of(" \t");
+        //no additional params
+        if (pos == string::npos) {
+            return alias_command;
+        }
+        return alias_command + cmd_line.substr(pos);
+    }
+
+    void printAliases() {
+        for ( auto& alias : aliases ) {
+            cout << alias.second << endl;
+        }
+    }
+
 
     void executeCommand(const char *cmd_line);
 
