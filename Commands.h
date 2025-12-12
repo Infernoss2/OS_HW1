@@ -114,9 +114,9 @@ public:
 
     void execute() override;
 
-    static off_t getFileSize(const string& file_path){}
+    static off_t getFileSize(const string& file_path);
 
-    static off_t getDiskUsage(const string& dir_path){}
+    static off_t getDiskUsage(const string& dir_path);
 
 };
 
@@ -425,7 +425,7 @@ public:
 
 class SmallShell {
 private:
-    string prompt = "smash> ";
+    string prompt = "smash";
     JobsList *jobs_list;
     char *lastPwd = nullptr;
     pid_t fg_pid = -1;
@@ -458,6 +458,10 @@ public:
 
     void setPrompt(char* newPrompt) {
         prompt = string(newPrompt);
+    }
+
+    void resetPrompt() {
+        prompt = "smash";
     }
 
     list<pair<string, string>>  getAliases() const {
@@ -516,7 +520,6 @@ public:
             cout << alias.second << endl;
         }
     }
-
 
     void executeCommand(const char *cmd_line);
 

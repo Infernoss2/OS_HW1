@@ -220,11 +220,13 @@ BuiltInCommand::BuiltInCommand(string cmd_line, string org_cmd_line) : Command(c
 chpromptCommand::chpromptCommand(string cmd_line, string org_cmd_line) : BuiltInCommand(cmd_line, org_cmd_line) {}
 
 void chpromptCommand::execute() {
-    if (this->getArgsLength() == 0) {
-        return;
+    if (this->getArgsLength() == 1) {
+        SmallShell::getInstance().resetPrompt();
     }
-    char* newPrompt = this->getArgs()[0];
-    SmallShell::getInstance().setPrompt(newPrompt);
+    else {
+        char* newPrompt = this->getArgs()[1];
+        SmallShell::getInstance().setPrompt(newPrompt);
+    }
 }
 
 ShowPidCommand::ShowPidCommand(string cmd_line, string org_cmd_line) : BuiltInCommand(cmd_line, org_cmd_line) {}
@@ -723,7 +725,7 @@ void PipeCommand::execute() {
 DiskUsageCommand::DiskUsageCommand(string cmd_line, string org_cmd_line)
                                     : Command(cmd_line, org_cmd_line) {}
 
-off_t getFileSize(const string &file_path) {
+off_t DiskUsageCommand::getFileSize(const string &file_path) {
     struct stat st{};
     if (lstat(file_path.c_str(), &st) == -1) {
         perror("smash error: lstat failed");
@@ -732,7 +734,17 @@ off_t getFileSize(const string &file_path) {
     return (st.st_blocks * 512);
 }
 
-off_t getDiskUsage(const string& dir_path) {
+off_t DiskUsageCommand::getDiskUsage(const string& dir_path) {
+    struct stat st{};
+    if (lstat(dir_path.c_str(), &st) == -1) {
+        perror("smash error: lstat failed");
+        return -1;
+    }
+
+    if (!S_ISDIR(st.st_mode)) {
+        return getFileSize(dir_path);
+    }
+
     int fd = open(dir_path.c_str(), O_RDONLY | O_DIRECTORY); //getdents64 receives fd of an open file.
     if (fd == -1) {
         perror("smash error: open failed");
@@ -741,6 +753,7 @@ off_t getDiskUsage(const string& dir_path) {
 
     off_t total_disk_usage = getFileSize(dir_path);
     if (total_disk_usage == -1) {
+        close(fd);
         return -1;
     }
     char buffer[BUFFER_SIZE];
@@ -752,6 +765,7 @@ off_t getDiskUsage(const string& dir_path) {
         }
         else if (bytes_read == -1) {
             perror("smash error: getdents64 failed");
+            close(fd);
             return -1;
         }
         int pos = 0;
@@ -768,6 +782,7 @@ off_t getDiskUsage(const string& dir_path) {
             if (current_file->d_type == DT_DIR) {
                 off_t additional_disk_usage = getDiskUsage(fullPath);
                 if (additional_disk_usage == -1) {
+                    close(fd);
                     return -1;
                 }
                 total_disk_usage += additional_disk_usage;
@@ -775,6 +790,10 @@ off_t getDiskUsage(const string& dir_path) {
             else {
                 off_t additional_disk_usage = getFileSize(fullPath);
                 if (additional_disk_usage == -1) { //lstat failed
+                    if (close(fd) == -1) {
+                        perror("smash error: close failed");
+                        return -1;
+                    }
                     return -1;
                 }
                 total_disk_usage += additional_disk_usage;
@@ -782,16 +801,14 @@ off_t getDiskUsage(const string& dir_path) {
             pos += current_file->d_reclen;
         }
     }
-    if (close(fd) == -1){
+    if (close(fd) == -1) {
         perror("smash error: close failed");
         return -1;
     }
-
     return total_disk_usage;
 }
 
 void DiskUsageCommand::execute() {
-    cout <<"$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$ 1" << endl;
     char** args = getArgs();
     int argv = getArgsLength();
     if (argv > 2) {
@@ -807,13 +824,12 @@ void DiskUsageCommand::execute() {
     else {
         strcpy(cur_dir, args[1]);
     }
-    cout <<"$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$ 2" << endl;
     off_t total_disk_usage = getDiskUsage(cur_dir); //by bytes
     if (total_disk_usage != -1) {
         off_t total_disk_usage_rounded = (total_disk_usage + 1023) / 1024;
         cout <<"Total disk usage: " << total_disk_usage_rounded << " KB" << endl;
     }
-    cout <<"$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$ 3" << total_disk_usage << endl;
+    cout << total_disk_usage << endl;
 }
 
 WhoAmICommand::WhoAmICommand(string cmd_line, string org_cmd_line) : Command(cmd_line, org_cmd_line) {}
